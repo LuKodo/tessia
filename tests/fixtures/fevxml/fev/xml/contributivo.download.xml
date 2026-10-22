@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<AttachedDocument xmlns="urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">
+  <cbc:ID>FVS1000001</cbc:ID>
+  <cac:Attachment>
+    <cac:ExternalReference>
+      <cbc:MimeCode>text/xml</cbc:MimeCode>
+      <cbc:Description><![CDATA[<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+  <ext:UBLExtensions>
+    <ext:UBLExtension>
+      <ext:ExtensionContent>
+        <CustomTagGeneral>
+          <Interoperabilidad>
+            <Group schemeName="Sector Salud">
+              <Collection schemeName="Usuario">
+                <AdditionalInformation>
+                  <Name>CODIGO_PRESTADOR</Name>
+                  <Value>1300185002</Value>
+                </AdditionalInformation>
+                <AdditionalInformation>
+                  <Name>MODALIDAD_PAGO</Name>
+                  <Value schemeID="04" schemeName="salud_modalidad_pago.gc">Pago por evento</Value>
+                </AdditionalInformation>
+                <AdditionalInformation>
+                  <Name>COBERTURA_PLAN_BENEFICIOS</Name>
+                  <Value schemeID="01" schemeName="salud_cobertura.gc">Plan de beneficios en salud financiado con UPC</Value>
+                </AdditionalInformation>
+                <AdditionalInformation>
+                  <Name>NUMERO_CONTRATO</Name>
+                  <Value> 22382 </Value>
+                </AdditionalInformation>
+                <AdditionalInformation>
+                  <Name>NUMERO_POLIZA</Name>
+                  <Value></Value>
+                </AdditionalInformation>
+                <AdditionalInformation>
+                  <Name>22</Name>
+                  <Value>legacy</Value>
+                </AdditionalInformation>
+              </Collection>
+            </Group>
+          </Interoperabilidad>
+        </CustomTagGeneral>
+      </ext:ExtensionContent>
+    </ext:UBLExtension>
+  </ext:UBLExtensions>
+  <cbc:IssueDate>2026-08-06</cbc:IssueDate>
+  <cac:InvoicePeriod>
+    <cbc:StartDate>2026-08-01</cbc:StartDate>
+    <cbc:EndDate>2026-08-31</cbc:EndDate>
+  </cac:InvoicePeriod>
+  <cac:PrepaidPayment>
+    <cbc:ID schemeID="02">CUOTA</cbc:ID>
+    <cbc:PaidAmount currencyID="COP">3500.00</cbc:PaidAmount>
+    <cbc:InstructionID>Cuota moderadora</cbc:InstructionID>
+  </cac:PrepaidPayment>
+  <cac:PrepaidPayment>
+    <cbc:ID schemeID="01">1</cbc:ID>
+    <cbc:InstructionID> copago </cbc:InstructionID>
+  </cac:PrepaidPayment>
+  <cac:PrepaidPayment>
+    <cbc:ID schemeID="03">2</cbc:ID>
+    <cbc:InstructionID>PAGOS_COMPARTIDOS</cbc:InstructionID>
+  </cac:PrepaidPayment>
+  <cac:PrepaidPayment>
+    <cbc:ID schemeID="04">3</cbc:ID>
+  </cac:PrepaidPayment>
+  <cbc:Note>Ñandú &amp; ç "ok" 'x'</cbc:Note>
+</Invoice>]]></cbc:Description>
+    </cac:ExternalReference>
+  </cac:Attachment>
+</AttachedDocument>
