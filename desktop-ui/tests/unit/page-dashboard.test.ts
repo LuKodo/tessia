@@ -11,8 +11,8 @@ const IDLE_JOB = { id: "", tipo: "", corriendo: false, cancelable: false, inicia
 
 async function mountPage() {
   const routed = routedApi({
-    "GET /api/health": [{ nombre: "MySQL", disponible: true, latencia_ms: 2 }],
-    "GET /api/nota-tecnica": { exists: false, file_name: "" },
+    "GET /api/health": [{ nombre: "PostgreSQL", disponible: true, latencia_ms: 2 }],
+    "GET /api/nota-tecnica": { exists: false },
     "GET /api/cargues": [],
     "GET /api/jobs/current": IDLE_JOB,
     [CONSULTA]: fakeConsulta([]),

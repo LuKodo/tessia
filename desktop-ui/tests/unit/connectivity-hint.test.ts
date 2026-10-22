@@ -19,13 +19,13 @@ describe("isNetworkFailure", () => {
 });
 
 describe("connectivityHint", () => {
-  it("names the API base, the page origin and the flag on a network failure", () => {
+  it("names the API base and the page origin on a network failure, without CORS flags", () => {
     const hint = connectivityHint(new ApiError(0, "sin conexion"), BASE, ORIGIN);
     expect(hint).toContain(BASE);
     expect(hint).toContain(ORIGIN);
-    expect(hint).toContain("tessia serve --allowed-origin http://localhost:3000");
-    expect(hint).toContain("serve.allowed_origins");
-    expect(hint).toContain("tessia.env");
+    expect(hint).toContain("reinicie la aplicación");
+    expect(hint).not.toContain("allowed-origin");
+    expect(hint).not.toContain("CORS");
   });
 
   it("is empty for an HTTP 500", () => {
@@ -38,12 +38,12 @@ describe("connectivityHint", () => {
 
   it("drops trailing slashes of the API base", () => {
     const hint = connectivityHint(new TypeError("Failed to fetch"), `${BASE}//`, ORIGIN);
-    expect(hint).toContain(`${BASE} `);
+    expect(hint).toContain(`${BASE}.`);
     expect(hint).not.toContain(`${BASE}/`);
   });
 
   it("falls back to the page origin when the API base is empty (same-origin)", () => {
     const hint = connectivityHint(new ApiError(0, "x"), "", ORIGIN);
-    expect(hint).toContain(`${ORIGIN} `);
+    expect(hint).toContain(`${ORIGIN}.`);
   });
 });

@@ -33,7 +33,7 @@ describe("summarizeHealth", () => {
     expect(s.state).toBe("unreachable");
     expect(s.label).toBe("Sin conexión");
     expect(s.detail).toContain("No se pudo conectar");
-    expect(s.detail).toContain("--allowed-origin http://localhost:3000");
+    expect(s.detail).toContain("reinicie la aplicación");
   });
 
   it("keeps only the raw detail for an HTTP error", () => {

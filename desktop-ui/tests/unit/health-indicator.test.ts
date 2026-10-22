@@ -31,7 +31,7 @@ describe("<tx-health-indicator>", () => {
   });
 
   it("is green and explains itself in a tooltip when every service is up", async () => {
-    const el = await mountIndicator(async () => [{ nombre: "MySQL", disponible: true, latencia_ms: 1 }]);
+    const el = await mountIndicator(async () => [{ nombre: "PostgreSQL", disponible: true, latencia_ms: 1 }]);
     expect(badge(el).getAttribute("data-state")).toBe("ok");
     expect(badge(el).getAttribute("color")).toBe("success");
     expect(badge(el).textContent!.trim()).toBe("Servicio activo");
@@ -40,7 +40,7 @@ describe("<tx-health-indicator>", () => {
 
   it("is degraded and names what is down", async () => {
     const el = await mountIndicator(async () => [
-      { nombre: "MySQL", disponible: true, latencia_ms: 1 },
+      { nombre: "PostgreSQL", disponible: true, latencia_ms: 1 },
       { nombre: "Portal", disponible: false, latencia_ms: 0 },
     ]);
     expect(badge(el).getAttribute("data-state")).toBe("degraded");
@@ -58,7 +58,7 @@ describe("<tx-health-indicator>", () => {
   });
 
   it("re-checks every 5 s", async () => {
-    const el = await mountIndicator(async () => [{ nombre: "MySQL", disponible: true, latencia_ms: 1 }]);
+    const el = await mountIndicator(async () => [{ nombre: "PostgreSQL", disponible: true, latencia_ms: 1 }]);
     await vi.advanceTimersByTimeAsync(10000);
     await settle(el);
     expect((holder.api.health as ReturnType<typeof vi.fn>).mock.calls.length).toBe(3);

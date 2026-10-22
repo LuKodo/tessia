@@ -145,7 +145,7 @@ describe("<tx-proceso-panel>", () => {
 
   it("asks to select a cargue when there is none", async () => {
     const { el, calls } = await mountPanel([]);
-    expect(q<TxSelectMenu>(el, "[data-testid=cargue-select]").placeholder).toBe("sin cargues en paths.automatic");
+    expect(q<TxSelectMenu>(el, "[data-testid=cargue-select]").placeholder).toBe("sin cargues");
     click(q(el, "[data-testid=run-full]"));
     await el.updateComplete;
     expect(status(el).textContent).toBe("selecciona un cargue primero");
@@ -181,7 +181,7 @@ describe("<tx-proceso-panel>", () => {
   it("runs the full process after confirmation with the capitalized keys", async () => {
     const { el, callsTo } = await mountPanel([cargue({})]);
     click(q(el, "[data-testid=run-full]"));
-    expect(dialogs.confirm?.text).toBe('¿Ejecutar el proceso COMPLETO sobre "A"? Esto escribe de verdad (Medicar, SISPRO, Siesa, MySQL, disco).');
+    expect(dialogs.confirm?.text).toBe('¿Ejecutar el proceso COMPLETO sobre "A"? Esto escribe de verdad (Medicar, SISPRO, Postgres, Redis, disco).');
     dialogs.answerConfirm(true);
     await flush(el);
     const sent = callsTo("POST", "/api/run");

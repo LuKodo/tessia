@@ -127,7 +127,7 @@ export class TxProcesoPanel extends LitElement {
     const rango = fromPhase || toPhase ? `las fases ${fromPhase || "(inicio)"} → ${toPhase || "(fin)"}` : "el proceso COMPLETO";
     const preparation = this.current?.estado === "SIN_PREPARAR" ? " Primero se preparará el convenio desde su CSV." : "";
     const cargue = this.selected;
-    if (!(await dialogs.confirmAction(`¿Ejecutar ${rango} sobre "${cargue}"?${preparation} Esto escribe de verdad (Medicar, SISPRO, Siesa, MySQL, disco).`))) return;
+    if (!(await dialogs.confirmAction(`¿Ejecutar ${rango} sobre "${cargue}"?${preparation} Esto escribe de verdad (Medicar, SISPRO, Postgres, Redis, disco).`))) return;
     this.status = { text: "iniciando…", kind: "" };
     try {
       // Capitalized keys: the Go request struct has no json tags.
@@ -173,7 +173,7 @@ export class TxProcesoPanel extends LitElement {
               data-testid="cargue-select"
               value-key="value"
               label-key="label"
-              placeholder=${list ? "sin cargues en paths.automatic" : "cargando…"}
+              placeholder=${list ? "sin cargues" : "cargando…"}
               .items=${options}
               .value=${this.selected ?? undefined}
               @tx-change=${(e: CustomEvent<{ value?: string }>) => (this.selected = e.detail.value ?? null)}

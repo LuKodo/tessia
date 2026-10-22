@@ -12,16 +12,17 @@ export function isNetworkFailure(error: unknown): boolean {
 /**
  * Actionable Spanish hint for a network-level failure, "" for anything else (no error, HTTP
  * errors). Pure: the caller passes the configured API base and the page origin
- * (`window.location.origin`).
+ * (`window.location.origin`). In the desktop app the API is served in-process on the app's
+ * own origin, so a network failure means the API is unreachable from the shell: restarting
+ * the app is the recovery path (there is no CORS or `--allowed-origin` in the desktop build).
  */
 export function connectivityHint(error: unknown, apiBase: string, origin: string): string {
   if (!isNetworkFailure(error)) return "";
   const pageOrigin = origin || "el origen de esta página";
   const base = apiBase.replace(/\/+$/, "") || pageOrigin;
   return (
-    `El navegador no distingue un servicio detenido de un bloqueo CORS. ` +
-    `Verifique que el servicio esté activo en ${base} y que se haya iniciado con ` +
-    `"tessia serve --allowed-origin ${pageOrigin}" ` +
-    `(o "serve.allowed_origins" en tessia.env). Origen de esta página: ${pageOrigin}.`
+    `La API no respondió en ${base}. En la aplicación de escritorio la API se sirve dentro del ` +
+    `mismo proceso, en el origen de esta ventana: reinicie la aplicación. ` +
+    `Origen de esta página: ${pageOrigin}.`
   );
 }
