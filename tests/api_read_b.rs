@@ -194,3 +194,186 @@ fn hallazgos_routes_answer_405_for_other_methods() {
     assert_eq!(response.status, 405);
     assert_eq!(response.header("allow"), Some("GET"));
 }
+
+// ---- informe ---------------------------------------------------------------
+
+use tessia::domain::Outcome;
+use tessia::domain::Phase;
+use tessia::domain::dataset::test_support::InvoiceBuilder;
+
+const CARGUE: &str = "CargueA";
+
+/// The synthetic equivalent of Go's `testdata/golden/dashboard/informe_a.json`.
+fn informe_fixture(env: &Env) {
+    env.dataset(CARGUE, 'a', |ds| {
+        ds.invoice(InvoiceBuilder::new("FVS1").line("10"))
+            .invoice(InvoiceBuilder::new("FVS2").line("10"))
+            .invoice(InvoiceBuilder::new("fvs-3").line("10"))
+            .invoice(InvoiceBuilder::new("FVS6").line("10"))
+            .excluded("FVS8", "MONTO_MAXIMO_SUPERADO")
+            .manual_review("FVS9", "SIN_SSC", "sin ssc")
+    });
+    env.phase(
+        "FVS6",
+        Phase::Derechos,
+        Outcome::manual_review("SIN_DERECHOS: no vigente"),
+        13,
+    );
+    env.phase(
+        "FVS3",
+        Phase::TheFactory,
+        Outcome::manual_review("SIN_XML: falta"),
+        11,
+    );
+    env.phase(
+        "FVS2",
+        Phase::Rips,
+        Outcome::failed("DESCARGA: timeout"),
+        12,
+    );
+    env.phase(
+        "FVS3",
+        Phase::FevValor,
+        Outcome::manual_review("VALOR_DIFERENTE: x"),
+        10,
+    );
+    env.phase(
+        "FVS3",
+        Phase::Conciliacion,
+        Outcome::excluded("BLOQUEADA_TARIFA: precio del XML supera la nota tecnica"),
+        20,
+    );
+    env.phase("FVS1", Phase::Derechos, Outcome::done(), 5);
+    env.phase(
+        "FVS1",
+        Phase::Cuv,
+        Outcome::new(tessia::domain::PhaseState::EnProgreso, ""),
+        6,
+    );
+}
+
+#[test]
+fn the_informe_lists_what_stopped_in_the_golden_shape() {
+    let env = env();
+    informe_fixture(&env);
+    let response = env.get(&format!("/api/cargues/{CARGUE}/informe"), &[]);
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.header("content-type"),
+        Some("application/json; charset=utf-8")
+    );
+    assert!(response.body.ends_with(b"\n"));
+    let mut body = json(&response);
+    let generated = body["generado_en"]
+        .as_str()
+        .expect("generado_en")
+        .to_owned();
+    assert!(
+        generated.ends_with('Z') && generated.len() == 20,
+        "{generated}"
+    );
+    body["generado_en"] = json!("GENERATED");
+    assert_eq!(
+        body,
+        json!({
+            "cargue": CARGUE,
+            "generado_en": "GENERATED",
+            "incompleto": false,
+            "conteos": {"revision_manual": 3, "excluidas": 2, "fallas": 1},
+            "items": [
+                {"factura": "FVS9", "fase": "convenio", "categoria": "revision_manual", "codigo": "SIN_SSC", "motivo": "sin ssc", "actualizado_en": ""},
+                {"factura": "FVS6", "fase": "derechos", "categoria": "revision_manual", "codigo": "SIN_DERECHOS", "motivo": "no vigente", "actualizado_en": "2026-09-12T07:13:00Z"},
+                {"factura": "FVS3", "fase": "thefactory", "categoria": "revision_manual", "codigo": "SIN_XML", "motivo": "falta", "actualizado_en": "2026-09-12T07:11:00Z"},
+                {"factura": "FVS2", "fase": "rips", "categoria": "falla", "codigo": "DESCARGA", "motivo": "timeout", "actualizado_en": "2026-09-12T07:12:00Z"},
+                {"factura": "FVS8", "fase": "convenio", "categoria": "excluida", "codigo": "", "motivo": "MONTO_MAXIMO_SUPERADO", "actualizado_en": ""},
+                {"factura": "FVS3", "fase": "conciliacion", "categoria": "excluida", "codigo": "BLOQUEADA_TARIFA", "motivo": "precio del XML supera la nota tecnica", "actualizado_en": "2026-09-12T07:20:00Z"},
+            ]
+        })
+    );
+}
+
+#[test]
+fn the_informe_csv_is_a_download_with_bom_semicolons_and_neutralized_formulas() {
+    let env = env();
+    env.dataset("Carga_v2-b", 'a', |ds| {
+        ds.invoice(InvoiceBuilder::new("FVS1").line("10"))
+            .manual_review("FVS9", "SIN_SSC", "=HYPERLINK(\"x\");y")
+    });
+    env.phase(
+        "FVS1",
+        Phase::Rips,
+        Outcome::failed("DESCARGA: timeout"),
+        12,
+    );
+    let response = env.get("/api/cargues/Carga_v2-b/informe", &[("formato", "csv")]);
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.header("content-type"),
+        Some("text/csv; charset=utf-8")
+    );
+    assert_eq!(
+        response.header("content-disposition"),
+        Some("attachment; filename=\"Informe_revision_manual_Carga_v2-b.csv\"")
+    );
+    assert_eq!(
+        text(&response),
+        "\u{feff}Factura;Fase;Categoria;Codigo;Motivo;Actualizado\r\n\
+         FVS9;convenio;Revisión manual;SIN_SSC;\"'=HYPERLINK(\"\"x\"\");y\";\r\n\
+         FVS1;rips;Falla;DESCARGA;timeout;2026-09-12T07:12:00Z\r\n"
+    );
+}
+
+#[test]
+fn the_informe_reads_the_current_cargue_and_an_unprepared_one_is_empty() {
+    let env = env();
+    informe_fixture(&env);
+    // A newer upload of the same load, not prepared yet, does not shadow the
+    // prepared dataset the pointer names.
+    tessia::stores::dataset::test_support::seed_cargue(&env.db.pool(), CARGUE, 'b');
+    let current = json(&env.get(&format!("/api/cargues/{CARGUE}/informe"), &[]));
+    assert_eq!(current["conteos"]["revision_manual"], json!(3));
+
+    // A load that was only uploaded has an empty report.
+    tessia::stores::dataset::test_support::seed_cargue(&env.db.pool(), "SoloCsv", 'c');
+    let empty = env.get("/api/cargues/SoloCsv/informe", &[]);
+    assert_eq!(empty.status, 200);
+    let body = json(&empty);
+    assert_eq!(body["items"], json!([]));
+    assert_eq!(body["incompleto"], json!(false));
+    assert_eq!(
+        body["conteos"],
+        json!({"revision_manual": 0, "excluidas": 0, "fallas": 0})
+    );
+}
+
+#[test]
+fn the_informe_rejects_a_bad_format_and_unknown_cargues() {
+    let env = env();
+    informe_fixture(&env);
+    let bad = env.get(
+        &format!("/api/cargues/{CARGUE}/informe"),
+        &[("formato", "xml")],
+    );
+    assert_eq!(
+        (bad.status, error(&bad).as_str()),
+        (400, "formato debe ser json o csv")
+    );
+    // The format is checked before the cargue.
+    let both = env.get("/api/cargues/Nope/informe", &[("formato", "xml")]);
+    assert_eq!(both.status, 400);
+
+    let unknown = env.get("/api/cargues/Nope/informe", &[]);
+    assert_eq!(unknown.status, 404);
+    assert_eq!(error(&unknown), "dashboard: cargue not found: \"Nope\"");
+    let dots = env.get("/api/cargues/../informe", &[]);
+    assert_eq!(dots.status, 404);
+    assert_eq!(
+        error(&dots),
+        "dashboard: cargue not found: invalid id \"..\""
+    );
+    // Only GET is routed.
+    assert_eq!(
+        env.post(&format!("/api/cargues/{CARGUE}/informe")).status,
+        405
+    );
+}

@@ -1,6 +1,7 @@
 //! `radicacion_estado`: Mutual Ser filing pipeline state, one row per
 //! normalized invoice (see [`crate::domain::radicacion`]).
 
+mod reports;
 mod schema;
 
 use std::collections::{HashMap, HashSet};
@@ -12,6 +13,7 @@ use super::chunks;
 use crate::db::{DbError, DbPool, DbResult};
 use crate::domain::normalize_invoice;
 use crate::domain::radicacion::{RadState, RadStatus, Step};
+pub use reports::{CargueRef, DatasetEntry, ReportStore};
 use schema::radicacion_estado as t;
 
 #[derive(Queryable, Selectable)]

@@ -28,7 +28,7 @@ pub fn env_with(pairs: Vec<(&str, String)>) -> Env {
     if !pairs.is_empty() {
         let root = ctx.workdir_root.to_string_lossy().into_owned();
         let mut all = vec![("TESSIA_WORKDIR_ROOT", root)];
-        all.extend(pairs.into_iter().map(|(k, v)| (k, v)));
+        all.extend(pairs);
         ctx = ctx.with_settings(Settings::from_pairs(all));
     }
     // The API's own small pool, like the real wiring.
@@ -78,4 +78,82 @@ pub fn error(response: &Response) -> String {
         .as_str()
         .unwrap_or_default()
         .to_owned()
+}
+
+// ---- seeding ---------------------------------------------------------------
+
+use diesel::RunQueryDsl;
+use diesel::sql_types::Text;
+use tessia::domain::dataset::Dataset;
+use tessia::domain::dataset::test_support::DatasetBuilder;
+use tessia::domain::radicacion::{RadState, RadStatus, Step};
+use tessia::domain::{Outcome, Phase};
+use tessia::stores::dataset::DatasetStore;
+use tessia::stores::dataset::test_support::seed_cargue;
+use tessia::stores::proceso::{ProcesoStore, SaveRow};
+use tessia::stores::radicacion::RadicacionStore;
+
+impl Env {
+    /// Registers the upload `load` (hash `hash_char`) and stores the dataset
+    /// `build` makes for it, which becomes the load's current one.
+    pub fn dataset(
+        &self,
+        load: &str,
+        hash_char: char,
+        build: impl FnOnce(DatasetBuilder) -> DatasetBuilder,
+    ) -> Dataset {
+        let seq = seed_cargue(&self.db.pool(), load, hash_char);
+        let ds = build(DatasetBuilder::new(seq).load(load)).build();
+        DatasetStore::new(self.db.pool())
+            .replace(&ds, false)
+            .expect("store dataset");
+        ds
+    }
+
+    /// Stores a phase outcome and pins its `updated_at` (`2026-09-12 07:MM:00Z`).
+    pub fn phase(&self, invoice: &str, phase: Phase, outcome: Outcome, minute: u32) {
+        ProcesoStore::new(self.db.pool())
+            .save(&SaveRow {
+                invoice: invoice.into(),
+                phase,
+                outcome,
+                intentos: 1,
+                cargue_id: None,
+            })
+            .expect("save phase state");
+        self.set_time(
+            "proceso_estado",
+            "num_factura",
+            invoice,
+            Some(phase.as_str()),
+            &format!("2026-09-12 07:{minute:02}:00+00"),
+        );
+    }
+
+    /// Stores a filing state and pins its `updated_at` (any timestamptz text).
+    pub fn filing(&self, invoice: &str, step: Step, status: RadStatus, detail: &str, at: &str) {
+        let mut state = RadState::new(invoice, step);
+        state.status = status;
+        state.last_detail = detail.into();
+        RadicacionStore::new(self.db.pool())
+            .save(&state)
+            .expect("save filing state");
+        self.set_time("radicacion_estado", "invoice", invoice, None, at);
+    }
+
+    fn set_time(&self, table: &str, key: &str, invoice: &str, phase: Option<&str>, at: &str) {
+        let mut sql = format!("UPDATE {table} SET updated_at = $1::timestamptz WHERE {key} = $2");
+        if phase.is_some() {
+            sql.push_str(" AND fase = $3");
+        }
+        let mut conn = self.db.conn();
+        let query = diesel::sql_query(sql)
+            .bind::<Text, _>(at)
+            .bind::<Text, _>(invoice);
+        match phase {
+            Some(p) => query.bind::<Text, _>(p).execute(&mut conn),
+            None => query.execute(&mut conn),
+        }
+        .expect("pin updated_at");
+    }
 }
