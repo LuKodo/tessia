@@ -23,6 +23,7 @@ use crate::nt::{NtCatalog, RedisNt};
 use crate::storage::{Artifacts, CassandraStore, ObjectStore, Workdir};
 use crate::stores::artefactos::ArtefactosStore;
 use crate::stores::cargues::CarguesStore;
+use crate::stores::dataset::DatasetStore;
 use crate::stores::derechos::DerechosCache;
 use crate::stores::leases::LeaseStore;
 use crate::stores::parametros::ParametrosStore;
@@ -171,6 +172,10 @@ impl AppContext {
 
     pub fn cargues(&self) -> CarguesStore {
         CarguesStore::new(self.pool.clone())
+    }
+
+    pub fn dataset(&self) -> DatasetStore {
+        DatasetStore::new(self.pool.clone())
     }
 
     pub fn artefactos(&self) -> ArtefactosStore {
