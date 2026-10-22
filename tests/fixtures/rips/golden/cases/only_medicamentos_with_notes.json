@@ -1,0 +1,56 @@
+{
+  "numDocumentoIdObligado": "806011811",
+  "numFactura": "FVS1000003",
+  "tipoNota": "NA",
+  "numNota": "NA-7",
+  "usuarios": [
+    {
+      "tipoDocumentoIdentificacion": "RC",
+      "numDocumentoIdentificacion": "900000003",
+      "tipoUsuario": "04",
+      "fechaNacimiento": "2020-12-31",
+      "codSexo": "I",
+      "codPaisResidencia": "031",
+      "codMunicipioResidencia": "13001",
+      "codZonaTerritorialResidencia": "02",
+      "incapacidad": "NO",
+      "consecutivo": 1,
+      "codPaisOrigen": "031",
+      "registroSIRAS": "SIRAS-1",
+      "servicios": {
+        "medicamentos": [
+          {
+            "codPrestador": "130018500201",
+            "idMIPRES": null,
+            "fechaDispensAdmon": "2026-09-05 09:09",
+            "codDiagnosticoPrincipal": "",
+            "codDiagnosticoPrincipalCIE11": null,
+            "nomCodDiagnosticoPrincipalCIE11": null,
+            "codDiagnosticoRelacionado": "Z008",
+            "codDiagnosticoRelacionadoCIE11": null,
+            "nomCodDiagnosticoRelacionadoCIE11": null,
+            "tipoMedicamento": "01",
+            "codTecnologiaSalud": "CUM-3",
+            "nomTecnologiaSalud": "",
+            "concentracionMedicamento": 10,
+            "unidadMedida": 7,
+            "formaFarmaceutica": "CAPSULA",
+            "unidadMinDispensa": 99,
+            "cantidadMedicamento": 2,
+            "diasTratamiento": 30,
+            "tipoDocumentoIdentificacion": "CC",
+            "numDocumentoIdentificacion": "11111111",
+            "vrUnitMedicamento": 0,
+            "vrDispensacion": 0,
+            "vrServicio": 0,
+            "conceptoRecaudo": "05",
+            "valorPagoModerador": 0,
+            "numFEVPagoModerador": null,
+            "consecutivo": 1,
+            "codigoVIDA": null
+          }
+        ]
+      }
+    }
+  ]
+}
