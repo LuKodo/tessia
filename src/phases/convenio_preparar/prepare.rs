@@ -23,100 +23,17 @@
 use std::collections::{HashMap, HashSet};
 
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
 use super::amount::{format_decimal2, parse_loose_number};
 use super::catalog::{Catalog, generic_code_from_plu};
-use super::csv::{Line, has_prepared_format};
+use super::csv::has_prepared_format;
 use super::mipres::{MipresChecker, MipresError, MipresRun, Verdict, is_evento_no_pbs};
 use super::subplan::{AutomaticSubplans, selected_set, subplan_of};
+use crate::domain::dataset::{Excluded, Invoice, Line, ManualReview, Stats};
 use crate::util::decimal::parse_agreement_amount;
 
 /// Code of an invoice whose lines name more than one affiliate.
 pub const CODE_MULTIPLE_AFFILIATES: &str = "MULTIPLES_AFILIADOS_EN_FACTURA";
-
-/// One prepared invoice and its enriched lines.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Invoice {
-    #[serde(rename = "factura")]
-    pub invoice: String,
-    #[serde(rename = "lineas")]
-    pub lines: Vec<Line>,
-    /// MIPRES delivery ids verified for an EVENTO NO PBS invoice, joined by
-    /// `, ` (empty for any other invoice).
-    #[serde(
-        rename = "id_mipres",
-        default,
-        skip_serializing_if = "String::is_empty"
-    )]
-    pub id_mipres: String,
-}
-
-/// An invoice removed by the preparation; `reason` is the legacy observation
-/// recorded in `proceso_estado`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Excluded {
-    #[serde(rename = "factura")]
-    pub invoice: String,
-    #[serde(rename = "motivo")]
-    pub reason: String,
-}
-
-/// An invoice held for a person to review.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ManualReview {
-    #[serde(rename = "factura")]
-    pub invoice: String,
-    #[serde(rename = "codigo")]
-    pub code: String,
-    #[serde(rename = "motivo")]
-    pub reason: String,
-}
-
-impl ManualReview {
-    /// The stored message: `<code>: <reason>`.
-    pub fn text(&self) -> String {
-        format!("{}: {}", self.code, self.reason)
-    }
-}
-
-/// Summary of a preparation (Go JSON names kept for the stored dataset).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Stats {
-    #[serde(rename = "medicamentos")]
-    pub medicines: usize,
-    #[serde(rename = "otros_servicios")]
-    pub other_services: usize,
-    #[serde(rename = "lineas_con_cuota")]
-    pub copay_lines: usize,
-    #[serde(rename = "lineas_sin_factura")]
-    pub dropped_no_invoice: usize,
-    #[serde(rename = "facturas_no_seleccionadas")]
-    pub ignored: usize,
-    /// Finished invoices the walk reached (they never consume `--limit`).
-    #[serde(rename = "facturas_ya_terminadas")]
-    pub finished: usize,
-    /// Pending invoices evaluated.
-    #[serde(rename = "facturas_evaluadas")]
-    pub evaluated: usize,
-    /// Pending invoices that ended prepared (what `--limit` counts).
-    #[serde(rename = "facturas_pendientes_preparadas")]
-    pub prepared_pending: usize,
-    /// The requested `--limit` (0 when none).
-    #[serde(rename = "limite")]
-    pub limit: usize,
-    /// Invoices held only because MIPRES was not available.
-    #[serde(
-        rename = "facturas_mipres_no_disponible",
-        default,
-        skip_serializing_if = "is_zero"
-    )]
-    pub mipres_unavailable: usize,
-}
-
-fn is_zero(value: &usize) -> bool {
-    *value == 0
-}
 
 /// Outcome of [`prepare`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -165,7 +82,7 @@ pub fn prepare(
         note_selection(lines, &selected, &groups, &mut result);
     }
     if options.limit > 0 {
-        result.stats.limit = options.limit;
+        result.stats.limit = to_i64(options.limit);
     }
     let interrupted = crate::shutdown::requested;
     let mut mipres = options
@@ -178,8 +95,8 @@ pub fn prepare(
     };
 
     for (position, invoice) in order.iter().enumerate() {
-        if options.limit > 0 && result.stats.prepared_pending >= options.limit {
-            result.stats.ignored += order.len() - position;
+        if options.limit > 0 && result.stats.prepared_pending >= to_i64(options.limit) {
+            result.stats.ignored += to_i64(order.len() - position);
             result.remaining.extend(
                 order[position..]
                     .iter()
@@ -241,10 +158,11 @@ fn note_selection(
         .map(|line| line.invoice.as_str())
         .filter(|invoice| !invoice.is_empty())
         .collect();
-    result.stats.ignored += all
-        .iter()
-        .filter(|invoice| !selected.contains(**invoice))
-        .count();
+    result.stats.ignored += to_i64(
+        all.iter()
+            .filter(|invoice| !selected.contains(**invoice))
+            .count(),
+    );
     let mut unknown: Vec<String> = selected
         .iter()
         .filter(|invoice| !groups.contains_key(invoice.as_str()))
@@ -254,6 +172,7 @@ fn note_selection(
     result.unknown_invoices = unknown;
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Outcome {
     Prepared(Invoice),
     Excluded(String),
@@ -281,6 +200,10 @@ fn apply(outcome: Outcome, invoice: &str, result: &mut PrepareResult) -> bool {
         }
     }
     false
+}
+
+fn to_i64(value: usize) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 fn count_lines(lines: &[Line], stats: &mut Stats) {
@@ -355,9 +278,9 @@ fn evaluate(
         }
     }
     Ok(Outcome::Prepared(Invoice {
-        invoice: invoice.to_owned(),
         lines: enriched,
         id_mipres,
+        ..Invoice::new(invoice)
     }))
 }
 

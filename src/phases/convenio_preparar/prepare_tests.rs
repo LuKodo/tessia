@@ -7,13 +7,13 @@ use std::sync::Mutex;
 use rust_decimal::Decimal;
 
 use super::catalog::{Catalog, Item};
-use super::csv::Line;
 use super::mipres::{
     CODE_MIPRES_NO_VERIFICADO, Delivery, MipresChecker, MipresError, REASON_MIPRES_SIN_ENTREGA,
     needs_mipres,
 };
 use super::prepare::{CODE_MULTIPLE_AFFILIATES, PrepareOptions, PrepareResult, prepare};
 use super::subplan::AutomaticSubplans;
+use crate::domain::dataset::Line;
 use crate::domain::normalize_invoice;
 use crate::util::decimal::parse_max_amount;
 
@@ -1005,7 +1005,7 @@ fn needs_mipres_follows_the_selection_and_the_allowlist() {
     let defaults = AutomaticSubplans::defaults();
     let only = |names: &[&str]| -> Vec<String> { names.iter().map(|s| (*s).to_owned()).collect() };
     assert!(!needs_mipres(&[], &[], &defaults));
-    assert!(!needs_mipres(&[b.clone()], &[], &defaults));
+    assert!(!needs_mipres(std::slice::from_ref(&b), &[], &defaults));
     assert!(needs_mipres(&[b.clone(), a.clone()], &[], &defaults));
     assert!(!needs_mipres(
         &[b.clone(), a.clone()],
@@ -1022,7 +1022,7 @@ fn needs_mipres_follows_the_selection_and_the_allowlist() {
     let without = AutomaticSubplans::from_list(&["EVENTO POS".to_owned()]);
     assert!(!needs_mipres(&[b.clone(), a.clone()], &[], &without));
     assert!(
-        needs_mipres(&[a.clone()], &only(&["EVS1"]), &without),
+        needs_mipres(std::slice::from_ref(&a), &only(&["EVS1"]), &without),
         "--invoices forces it"
     );
     let custom = AutomaticSubplans::from_list(&["evento no pbs".to_owned()]);

@@ -42,7 +42,7 @@ use anyhow::{Result, anyhow};
 
 use super::amount::price_text;
 use super::catalog::{Catalog, Item, normalize_code, normalize_product_type};
-use super::csv::Line;
+use crate::domain::dataset::Line;
 use crate::nt::{NtCatalog, NtRow};
 use crate::util::par;
 use crate::util::text::normalize_key;
@@ -118,10 +118,10 @@ fn product_type_of(row: &NtRow) -> String {
 
 fn concentration_of(row: &NtRow) -> String {
     for key in CONCENTRATION_KEYS {
-        if let Some(value) = row.get(key).map(|v| v.trim().to_owned()) {
-            if !value.is_empty() {
-                return value;
-            }
+        if let Some(value) = row.get(key).map(|v| v.trim().to_owned())
+            && !value.is_empty()
+        {
+            return value;
         }
     }
     text_of(row.upr_rips.as_deref())

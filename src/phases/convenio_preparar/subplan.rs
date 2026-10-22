@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use super::csv::Line;
+use crate::domain::dataset::Line;
 use crate::domain::normalize_invoice;
 use crate::stores::parametros::default_automatic_subplans;
 use crate::util::text::normalize_key;

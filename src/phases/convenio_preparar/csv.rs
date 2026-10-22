@@ -13,11 +13,10 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::sync::LazyLock;
 
+use crate::domain::dataset::Line;
+use crate::domain::normalize_invoice;
 use anyhow::{Result, bail};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
-
-use crate::domain::normalize_invoice;
 
 // Canonical (normalized) header names.
 const COL_NIT: &str = "nit";
@@ -75,123 +74,6 @@ pub const REQUIRED_COLUMNS: [&str; 11] = [
     COL_CUM,
 ];
 
-fn is_blank(text: &str) -> bool {
-    text.is_empty()
-}
-
-/// One dispensed item of the convenio plus the enrichment added by the
-/// preparation. The serde names are Go's JSON tags (the persisted shape).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Line {
-    #[serde(rename = "source_line", default)]
-    pub source_line: usize,
-    #[serde(rename = "nit", default, skip_serializing_if = "is_blank")]
-    pub nit: String,
-    #[serde(rename = "plan", default, skip_serializing_if = "is_blank")]
-    pub plan: String,
-    #[serde(rename = "subplan", default, skip_serializing_if = "is_blank")]
-    pub subplan: String,
-    /// Normalized (upper case, no dashes).
-    #[serde(rename = "factura", default)]
-    pub invoice: String,
-    /// As exported.
-    #[serde(rename = "factura_raw", default)]
-    pub invoice_raw: String,
-    #[serde(rename = "tipo_documento", default)]
-    pub doc_type: String,
-    #[serde(rename = "numero_documento", default)]
-    pub doc_number: String,
-    #[serde(rename = "beneficiario", default, skip_serializing_if = "is_blank")]
-    pub beneficiary: String,
-    #[serde(rename = "punto_venta", default, skip_serializing_if = "is_blank")]
-    pub point_of_sale: String,
-    #[serde(rename = "numero_formula", default, skip_serializing_if = "is_blank")]
-    pub formula_number: String,
-    #[serde(rename = "ssc", default, skip_serializing_if = "is_blank")]
-    pub ssc: String,
-    #[serde(rename = "tipo_formula", default, skip_serializing_if = "is_blank")]
-    pub formula_type: String,
-    #[serde(rename = "fecha", default)]
-    pub date: String,
-    #[serde(rename = "lote", default, skip_serializing_if = "is_blank")]
-    pub lot: String,
-    #[serde(rename = "plu", default)]
-    pub plu: String,
-    #[serde(rename = "articulo", default)]
-    pub article: String,
-    #[serde(rename = "cantidad", default)]
-    pub quantity: String,
-    #[serde(rename = "valor_unitario", default)]
-    pub unit_value: String,
-    #[serde(rename = "costo_unitario", default, skip_serializing_if = "is_blank")]
-    pub unit_cost: String,
-    #[serde(rename = "valor_total", default)]
-    pub total_value: String,
-    #[serde(rename = "cuota", default)]
-    pub copay: String,
-    #[serde(
-        rename = "numero_autorizacion",
-        default,
-        skip_serializing_if = "is_blank"
-    )]
-    pub authorization: String,
-    #[serde(rename = "mipres", default, skip_serializing_if = "is_blank")]
-    pub mipres: String,
-    /// CUM as exported.
-    #[serde(rename = "cum_convenio", default)]
-    pub agreement_cum: String,
-    #[serde(
-        rename = "codigo_diagnostico",
-        default,
-        skip_serializing_if = "is_blank"
-    )]
-    pub diagnosis_code: String,
-    #[serde(
-        rename = "nombre_diagnostico",
-        default,
-        skip_serializing_if = "is_blank"
-    )]
-    pub diagnosis_name: String,
-    #[serde(rename = "causal_exento", default, skip_serializing_if = "is_blank")]
-    pub causal_exento: String,
-    #[serde(rename = "ips", default, skip_serializing_if = "is_blank")]
-    pub ips: String,
-    #[serde(rename = "id_medico", default, skip_serializing_if = "is_blank")]
-    pub prescriber_id: String,
-    #[serde(rename = "nombre_medico", default, skip_serializing_if = "is_blank")]
-    pub prescriber_name: String,
-    #[serde(rename = "genero", default, skip_serializing_if = "is_blank")]
-    pub gender: String,
-    #[serde(rename = "fecha_nacimiento", default, skip_serializing_if = "is_blank")]
-    pub birth_date: String,
-    #[serde(rename = "departamento", default, skip_serializing_if = "is_blank")]
-    pub department: String,
-    #[serde(rename = "municipio", default, skip_serializing_if = "is_blank")]
-    pub municipality: String,
-    /// The file's own CLASIFICACION column (prepared-format exports only).
-    #[serde(rename = "clasificacion", default, skip_serializing_if = "is_blank")]
-    pub classification: String,
-
-    /// Billing CUM (catalog); the exported CUM until enriched.
-    #[serde(rename = "cum", default)]
-    pub cum: String,
-    /// 714 medicine, 799 other service.
-    #[serde(rename = "tipo_producto", default, skip_serializing_if = "is_blank")]
-    pub product_type: String,
-    #[serde(
-        rename = "forma_farmaceutica",
-        default,
-        skip_serializing_if = "is_blank"
-    )]
-    pub pharmaceutical_form: String,
-    #[serde(rename = "concentracion", default, skip_serializing_if = "is_blank")]
-    pub concentration: String,
-    #[serde(rename = "unidad_medida", default, skip_serializing_if = "is_blank")]
-    pub measure_unit: String,
-    #[serde(rename = "precio_pactado", default, skip_serializing_if = "is_blank")]
-    pub agreed_price: String,
-}
-
 /// Outcome of [`read_csv`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReadResult {
@@ -226,10 +108,10 @@ pub fn read_csv<R: BufRead>(mut reader: R) -> Result<ReadResult> {
             text.pop();
         }
         let mut text = text.trim_end_matches('\r').to_owned();
-        if line_no == 1 {
-            if let Some(stripped) = text.strip_prefix('\u{feff}') {
-                text = stripped.to_owned();
-            }
+        if line_no == 1
+            && let Some(stripped) = text.strip_prefix('\u{feff}')
+        {
+            text = stripped.to_owned();
         }
         if text.trim().is_empty() {
             continue;
@@ -289,7 +171,7 @@ fn build_line(index: &HashMap<String, usize>, fields: &[&str], source_line: usiz
     let invoice_raw = get(COL_INVOICE);
     let agreement_cum = get(COL_CUM);
     Line {
-        source_line,
+        source_line: i32::try_from(source_line).unwrap_or(i32::MAX),
         nit: get(COL_NIT),
         plan: get(COL_PLAN),
         subplan: get(COL_SUBPLAN),
@@ -713,20 +595,5 @@ mod tests {
         }
         let automatic = format!("{}\n{base}\n", HEADER.join("|"));
         assert!(!read(&automatic).expect("csv").prepared_format);
-    }
-
-    #[test]
-    fn json_shape_uses_the_go_tags_and_omits_empty_values() {
-        let line = Line {
-            invoice: "EVS1".into(),
-            plu: "1_1".into(),
-            ..Line::default()
-        };
-        let json = serde_json::to_value(&line).expect("json");
-        assert_eq!(json["factura"], "EVS1");
-        assert!(json.get("nit").is_none(), "omitempty");
-        assert!(json.get("cuota").is_some(), "required fields stay");
-        let back: Line = serde_json::from_value(json).expect("back");
-        assert_eq!(back, line);
     }
 }

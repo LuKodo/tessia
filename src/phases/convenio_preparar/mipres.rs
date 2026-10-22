@@ -18,9 +18,8 @@
 
 use std::collections::HashMap;
 
-use super::csv::Line;
-use super::prepare::ManualReview;
 use super::subplan::subplan_of;
+use crate::domain::dataset::{Line, ManualReview};
 use crate::util::text::normalize_key;
 
 /// Normalized subplan whose invoices need the delivery check.
