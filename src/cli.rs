@@ -34,7 +34,9 @@ pub enum Commands {
     },
     /// Proceso completo de un cargue
     Proceso(proceso::Args),
-    /// Concilia diferencias de valor
+    /// Procesa de punta a punta el día anterior (descarga, prepara y corre el proceso)
+    Diario(proceso::diario::Args),
+    // The description (about) comes from `conciliar::Args`.
     Conciliar(conciliar::Args),
     /// The Factory: XML, PDF y soporte CPScan
     Thefactory(thefactory::Args),
@@ -96,6 +98,8 @@ mod tests {
                 "--workers",
                 "4",
             ],
+            &["diario"],
+            &["diario", "--fecha", "2026-10-21", "--limit", "3", "--json"],
             &["conciliar", "--cargue", "C1"],
             &["thefactory", "descargar"],
             &["derechos", "validar"],
