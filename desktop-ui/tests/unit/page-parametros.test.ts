@@ -23,7 +23,7 @@ async function mountPage(routes: Parameters<typeof routedApi>[0] = {}) {
   const routed = routedApi({
     "GET /api/parameters": stored,
     "PUT /api/parameters": stored,
-    "GET /api/nota-tecnica": { exists: false, file_name: "Nota tecnica.xlsx" },
+    "GET /api/nota-tecnica": { exists: false },
     ...routes,
   });
   apiSlot.api = routed.api;

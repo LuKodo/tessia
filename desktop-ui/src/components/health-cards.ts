@@ -6,8 +6,7 @@ import { PollController } from "../controllers/poll-controller";
 import type { NotaTecnicaStatus, ServiceHealth } from "../types/api";
 import { connectivityHint } from "../utils/connectivity-hint";
 import { errorMessage } from "../utils/error-message";
-import { fmtTime } from "../utils/format";
-import { healthDetail, healthState, notaTecnicaLines, notaTecnicaState, notaTecnicaWarning } from "../utils/health-model";
+import { healthDetail, healthState, notaTecnicaDetail, notaTecnicaState } from "../utils/health-model";
 import type { HealthCardState } from "../utils/health-model";
 import "./tx-avatar";
 import "./tx-badge";
@@ -80,10 +79,6 @@ export class TxHealthCards extends LitElement {
       overflow-wrap: break-word;
       color: var(--tx-text-muted);
     }
-    .detail.warning {
-      font-weight: 700;
-      color: var(--tx-warning);
-    }
     .detail.plain {
       margin: 0;
     }
@@ -98,7 +93,7 @@ export class TxHealthCards extends LitElement {
   // The Nota Técnica published in Redis changes rarely, so a slow poll is enough.
   private nota = new PollController<NotaTecnicaStatus>(this, () => api.notaTecnica(), 60000, { pauseWhenHidden: true });
 
-  private card(name: string, state: HealthCardState, details: string[], warning = ""): TemplateResult {
+  private card(name: string, state: HealthCardState, detail: string): TemplateResult {
     const color = state.color;
     return html`<tx-card padding="sm" data-state=${state.key} data-testid="health-card">
       <div class="row">
@@ -108,8 +103,7 @@ export class TxHealthCards extends LitElement {
             <div class="name">${name}</div>
             ${state.label ? html`<tx-badge size="sm" variant="subtle" color=${color}>${state.label}</tx-badge>` : nothing}
           </div>
-          ${details.map((d) => html`<div class="detail">${d}</div>`)}
-          ${warning ? html`<div class="detail warning" data-testid="health-warning">${warning}</div>` : nothing}
+          <div class="detail">${detail}</div>
         </div>
       </div>
     </tx-card>`;
@@ -128,7 +122,7 @@ export class TxHealthCards extends LitElement {
     const notaError = this.nota.error;
     const hint = connectivityHint(error, apiBase, window.location.origin);
     return html`
-      ${(services || []).map((s) => this.card(s.nombre, healthState(s), [healthDetail(s)]))}
+      ${(services || []).map((s) => this.card(s.nombre, healthState(s), healthDetail(s)))}
       <!-- First load: neutral placeholders until the first /api/health answer. -->
       ${!services && !error ? [1, 2, 3, 4, 5].map(() => this.placeholder()) : nothing}
       <!-- No answer yet and the first request failed: show why, in the failing style. -->
@@ -143,9 +137,9 @@ export class TxHealthCards extends LitElement {
             </div>
           </tx-card>`
         : nothing}
-      <!-- Nota técnica: informational card (read-only Redis catalog: version, rows, dates, missing bases). -->
+      <!-- Nota técnica: informational card (read-only Redis catalog: version and rows). -->
       ${nota
-        ? this.card("Nota técnica", notaTecnicaState(nota), notaTecnicaLines(nota, fmtTime), notaTecnicaWarning(nota))
+        ? this.card("Nota técnica", notaTecnicaState(nota), notaTecnicaDetail(nota))
         : !notaError
           ? this.placeholder()
           : html`<tx-card padding="sm" data-state="down" data-testid="health-card">

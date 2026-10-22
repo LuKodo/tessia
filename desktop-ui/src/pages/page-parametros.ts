@@ -56,7 +56,7 @@ const NUMBER_FIELDS: readonly NumberFieldSpec[] = [
   },
 ];
 
-/** Parameters page: global preparation rules form plus the shared nota técnica card. */
+/** Parameters page: global preparation rules form plus the read-only nota técnica card. */
 export class PageParametros extends LitElement {
   static styles = css`
     :host {

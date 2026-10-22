@@ -303,24 +303,17 @@ export type HealthResponse = ServiceHealth[];
 // --- Nota técnica ------------------------------------------------------------
 
 /**
- * GET /api/nota-tecnica: read-only status of the Nota Técnica published in Redis (snake_case keys).
- * `{ "exists": false }` is the whole answer when Redis is unreachable or has no `nt:actual`.
+ * GET /api/nota-tecnica: read-only status of the Nota Técnica published in Redis. Always answers
+ * 200; `{ "exists": false }` is the whole answer when Redis is unreachable or has no `nt:actual`.
  */
 export interface NotaTecnicaStatus {
   exists: boolean;
-  /** Current version: 64 hex characters (SHA-256). */
-  version?: string;
   /** First 12 hex characters of `version`. */
   file_name?: string;
-  /** When the catalog was generated, local time "YYYY-MM-DD HH:MM:SS" (no zone). */
-  generado_en?: string;
-  /** When the catalog was published to Redis, RFC 3339 UTC. */
-  publicado_en?: string;
-  /** Number of rows of the catalog. */
-  total?: number;
-  con_precios?: number;
-  /** Bases the catalog lacks; a non-empty list is shown as a warning. */
-  bases_faltantes?: string[];
+  /** Current version: 64 hex characters (SHA-256). */
+  version?: string;
+  /** Number of rows of the catalog (`meta.filas`); the API forwards it as a string. */
+  filas?: string | number;
 }
 
 // --- Parameters --------------------------------------------------------------
