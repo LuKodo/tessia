@@ -1,6 +1,7 @@
 //! Pure domain types and rules shared by all phases (no I/O).
 
 pub mod cargue;
+pub mod dataset;
 pub mod invoice;
 pub mod phase;
 pub mod radicacion;
