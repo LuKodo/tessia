@@ -1,0 +1,8 @@
+{
+  "ResultState": true,
+  "ProcesoId": 4242,
+  "NumFactura": "FVS2000002",
+  "RutaArchivos": "C:\\Temp\\FVS2000002\\",
+  "ResultadosValidacion": [],
+  "CodigoUnicoValidacion": "1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1"
+}

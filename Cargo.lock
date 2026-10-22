@@ -2144,6 +2144,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rust_decimal",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

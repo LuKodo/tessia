@@ -1,0 +1,1 @@
+{"ResultadosValidacion":[{"Codigo":"RVG18","Observaciones":"   "}],"CodigoUnicoValidacion":null}

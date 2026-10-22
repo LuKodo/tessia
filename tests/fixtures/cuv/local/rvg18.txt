@@ -1,0 +1,13 @@
+{
+  "ResultState": false,
+  "ProcesoId": 0,
+  "NumFactura": null,
+  "RutaArchivos": "C:\\Temp\\FVS2000002\\",
+  "ResultadosValidacion": [
+    {
+      "Clase": "RECHAZADO",
+      "Codigo": " RVG18 ",
+      "Observaciones": " 1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1 "
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "ResultState": true,
+  "ProcesoId": 0,
+  "NumFactura": null,
+  "CodigoUnicoValidacion": null,
+  "CodigoUnicoValidacionToShow": null,
+  "FechaRadicacion": null,
+  "RutaArchivos": null,
+  "ResultadosValidacion": null
+}

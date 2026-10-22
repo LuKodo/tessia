@@ -1,0 +1,19 @@
+{
+  "ResultState": true,
+  "ProcesoId": 123456,
+  "NumFactura": "FVS1000001",
+  "CodigoUnicoValidacion": "0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaa",
+  "CodigoUnicoValidacionToShow": "0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaa",
+  "FechaRadicacion": "2026-08-06T10:11:12.345",
+  "RutaArchivos": "\\\\srv\\rips\\FVS1000001",
+  "ResultadosValidacion": [
+    {
+      "Clase": "NOTIFICACION",
+      "Codigo": "RVC019",
+      "Descripcion": "Validación <ok> & 'x' = ñ",
+      "Observaciones": "línea\nsegunda",
+      "PathFuente": "Rips",
+      "Fuente": "Rips"
+    }
+  ]
+}

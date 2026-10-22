@@ -1,0 +1,5 @@
+{
+  "RutaArchivos": "",
+  "NumFactura": "",
+  "ResultState": true
+}

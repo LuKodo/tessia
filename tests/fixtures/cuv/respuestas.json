@@ -1,0 +1,39 @@
+{
+ "respuestas": [
+  {
+   "name": "exito",
+   "body": "{\"ResultState\":true,\"ProcesoId\":123456,\"NumFactura\":\"FVS1000001\",\"CodigoUnicoValidacion\":\"0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaa\",\"CodigoUnicoValidacionToShow\":\"0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaaaa0aaaa\",\"FechaRadicacion\":\"2026-08-06T10:11:12.345\",\"RutaArchivos\":\"\\\\\\\\srv\\\\rips\\\\FVS1000001\",\"ResultadosValidacion\":[{\"Clase\":\"NOTIFICACION\",\"Codigo\":\"RVC019\",\"Descripcion\":\"Validación <ok> & 'x' = ñ\",\"Observaciones\":\"línea\\nsegunda\",\"PathFuente\":\"Rips\",\"Fuente\":\"Rips\",\"Extra\":1}]}",
+   "txt": "respuestas/exito.txt",
+   "barrido": "respuestas/exito.barrido.txt",
+   "cuv_rvg18": null
+  },
+  {
+   "name": "rvg18",
+   "body": "{\"ResultState\":false,\"ProcesoId\":0,\"NumFactura\":null,\"CodigoUnicoValidacion\":null,\"CodigoUnicoValidacionToShow\":null,\"FechaRadicacion\":\"0001-01-01T00:00:00\",\"RutaArchivos\":\"C:\\\\Temp\\\\FVS1000002\\\\\",\"ResultadosValidacion\":[{\"Clase\":\"RECHAZADO\",\"Codigo\":\"RVG18\",\"Descripcion\":\"El documento ya fue validado\",\"Observaciones\":\" 0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbb \",\"PathFuente\":\"\",\"Fuente\":\"FacturaElectronica\"},{\"Clase\":\"RECHAZADO\",\"Codigo\":\"RVC051\",\"Descripcion\":\"d\",\"Observaciones\":null,\"PathFuente\":null,\"Fuente\":null}]}",
+   "txt": "respuestas/rvg18.txt",
+   "barrido": "respuestas/rvg18.barrido.txt",
+   "cuv_rvg18": "0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbb"
+  },
+  {
+   "name": "rechazo",
+   "body": "{\"ResultState\":false,\"ProcesoId\":0,\"NumFactura\":\"FVS1000003\",\"ResultadosValidacion\":[{\"Clase\":\"RECHAZADO\",\"Codigo\":\"RVC033\",\"Descripcion\":\"Campo\",\"Observaciones\":\"obs\",\"PathFuente\":\"usuarios[0]\",\"Fuente\":\"Rips\"}]}",
+   "txt": "respuestas/rechazo.txt",
+   "barrido": "respuestas/rechazo.barrido.txt",
+   "cuv_rvg18": null
+  },
+  {
+   "name": "tipos_texto",
+   "body": "{\"ResultState\":\"true\",\"ProcesoId\":\"77\",\"NumFactura\":5,\"CodigoUnicoValidacion\":\"0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccc\",\"ResultadosValidacion\":[]}",
+   "txt": "respuestas/tipos_texto.txt",
+   "barrido": "respuestas/tipos_texto.barrido.txt",
+   "cuv_rvg18": null
+  },
+  {
+   "name": "minimo",
+   "body": "{\"ResultState\":true}",
+   "txt": "respuestas/minimo.txt",
+   "barrido": "respuestas/minimo.barrido.txt",
+   "cuv_rvg18": null
+  }
+ ]
+}

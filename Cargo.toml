@@ -38,6 +38,7 @@ rand = "0.9"
 redis = { version = "1", features = ["tls-native-tls"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "cookies", "gzip", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rust_decimal = { version = "1", features = ["db-diesel2-postgres", "serde-with-str"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
