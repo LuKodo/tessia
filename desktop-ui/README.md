@@ -40,10 +40,10 @@ origin (the bundle then contains no absolute API URL).
 
 ## Desktop window
 
-The built UI is also embedded in the native desktop executable (see `../tessia/README.md`, "Desktop
-app"). `../tessia/scripts/build-desktop.sh` runs the build with `VITE_API_BASE` set to the empty
-string, so the bundle calls `/api/*` on the window's own origin and needs no CORS, then copies
-`dist/` into `tessia/cmd/tessia/desktop_ui/`.
+The built UI is embedded in the native desktop executable. `scripts/build-desktop.sh` (repository
+root) runs `npm ci` and the build with `VITE_API_BASE` set to the empty string, so the bundle calls
+`/api/*` on the window's own origin and needs no CORS, then checks that `dist/` holds `index.html`
+and no absolute API URL. The embedding step reads `desktop-ui/dist` when the executable is built.
 
 ## CORS requirement
 
