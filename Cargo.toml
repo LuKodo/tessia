@@ -2,6 +2,7 @@
 name = "tessia"
 version = "0.1.0"
 edition = "2024"
+build = "src/build.rs"
 
 [lib]
 name = "tessia"
@@ -46,5 +47,7 @@ uuid = { version = "1.28.0", features = ["v4"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+# Self dependency: integration tests in tests/ get the `test-support` feature.
+tessia = { path = ".", features = ["test-support"] }
 tempfile = "3"
 tiny_http = "0.12"

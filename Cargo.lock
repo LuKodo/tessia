@@ -2078,6 +2078,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tessia",
  "thiserror",
  "tiny_http",
  "tracing",
