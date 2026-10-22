@@ -3,7 +3,7 @@
 //! (`OK` -> `DONE`, `VALOR_DIFERENTE` -> `REVISION_MANUAL`, `XML_SIN_VALOR` ->
 //! `FAILED`) and the XML totals in `factura_valor_xml`.
 //!
-//! The comparison is pure ([`compare`]) and works on [`ConvenioInvoice`], the
+//! The invoices come from the prepared dataset ([`load_convenio_invoices`]). The comparison is pure ([`compare`]) and works on [`ConvenioInvoice`], the
 //! text of the convenio `vlr. total` of each line. [`verify`] is the flow around
 //! it (claims, reading the XML from the artifacts, storing the results).
 
@@ -144,12 +144,38 @@ fn check(sources: &XmlSources, invoice: &ConvenioInvoice, version: i64) -> Check
     }
 }
 
-/// The convenio invoices to check for `req`. Phase B: the dataset store.
+/// The prepared invoices of the cargue as `fev verificar` needs them (Go
+/// `convenio.ReadInvoices`): only `req.invoices` when given, with the verbatim
+/// `vlr. total` text of every line. Fails when the cargue has no prepared dataset
+/// or none of the requested invoices is in it.
 pub fn load_convenio_invoices(
-    _ctx: &AppContext,
-    _req: &PhaseRequest,
+    ctx: &AppContext,
+    req: &PhaseRequest,
 ) -> Result<Vec<ConvenioInvoice>> {
-    bail!("fev verificar: el almacén del dataset del convenio todavía no está disponible")
+    let Some(dataset) = ctx
+        .dataset()
+        .read_current(&req.cargue_id, req.invoices.as_deref())?
+    else {
+        bail!(
+            "convenio: no hay dataset preparado para el cargue {:?} en la base de datos (ejecute `facturacion convenio preparar` primero)",
+            req.cargue_id
+        );
+    };
+    let invoices: Vec<ConvenioInvoice> = dataset
+        .invoices
+        .into_iter()
+        .map(|inv| ConvenioInvoice {
+            invoice: inv.invoice,
+            lines: inv.lines.into_iter().map(|l| l.total_value).collect(),
+        })
+        .collect();
+    if invoices.is_empty() && req.invoices.is_some() {
+        bail!(
+            "ninguna de las facturas indicadas está preparada en el cargue {:?}",
+            req.cargue_id
+        );
+    }
+    Ok(invoices)
 }
 
 /// `fev verificar` for `invoices` (the dataset invoices of the cargue). Every run

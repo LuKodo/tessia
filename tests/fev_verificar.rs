@@ -323,3 +323,105 @@ fn an_invoice_claimed_by_another_machine_is_skipped() {
         Some(PhaseState::EnProgreso)
     );
 }
+
+mod dataset {
+    use clap::Parser;
+    use tessia::cli::{Cli, Commands};
+    use tessia::domain::dataset::test_support::{DatasetBuilder, InvoiceBuilder};
+    use tessia::phases::fev::{self, run_verificar_phase};
+    use tessia::stores::dataset::test_support::seed_cargue;
+
+    use super::*;
+
+    fn store_dataset(ctx: &AppContext, db: &TestDb) {
+        let seq = seed_cargue(&db.pool(), CARGUE, 'a');
+        let ds = DatasetBuilder::new(seq)
+            .invoice(InvoiceBuilder::new("FEV1").line("$ 60,00").line("40"))
+            .invoice(InvoiceBuilder::new("fev-3").line("400"))
+            .invoice(InvoiceBuilder::new("FEV4").line("10"))
+            .excluded("FEV2", "SIN_PRECIO")
+            .build();
+        ctx.dataset().replace(&ds, false).expect("replace");
+    }
+
+    fn parse(args: &[&str]) -> fev::Args {
+        let mut argv = vec!["facturacion", "fev", "verificar", "--cargue", CARGUE];
+        argv.extend_from_slice(args);
+        match Cli::try_parse_from(argv).expect("parse").command {
+            Commands::Fev(args) => args,
+            other => panic!("not fev: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_phase_checks_the_prepared_invoices_of_the_dataset() {
+        let db = TestDb::new();
+        let ctx = AppContext::for_tests(&db);
+        seed(&ctx);
+        store_dataset(&ctx, &db);
+
+        let report = run_verificar_phase(&ctx, &PhaseRequest::new(CARGUE)).expect("phase");
+
+        let states: Vec<(String, PhaseState)> = report
+            .outcomes
+            .iter()
+            .map(|o| (o.invoice.clone(), o.outcome.state))
+            .collect();
+        assert_eq!(
+            states,
+            [
+                ("FEV1".to_owned(), PhaseState::Done),
+                ("FEV3".to_owned(), PhaseState::RevisionManual),
+                ("FEV4".to_owned(), PhaseState::Failed),
+            ],
+            "excluded FEV2 is not checked"
+        );
+        assert_eq!(state(&ctx, "FEV2"), None);
+    }
+
+    #[test]
+    fn invoices_flag_reads_only_those_and_fails_when_none_matches() {
+        let db = TestDb::new();
+        let ctx = AppContext::for_tests(&db);
+        seed(&ctx);
+        store_dataset(&ctx, &db);
+        let mut req = PhaseRequest::new(CARGUE);
+        req.invoices = Some(vec!["FEV3".into()]);
+
+        let report = run_verificar_phase(&ctx, &req).expect("phase");
+        assert_eq!(report.outcomes.len(), 1);
+        assert_eq!(state(&ctx, "FEV1"), None);
+
+        req.invoices = Some(vec!["FEV2".into(), "NOPE1".into()]);
+        let err = run_verificar_phase(&ctx, &req).expect_err("none prepared");
+        assert!(
+            err.to_string()
+                .starts_with("ninguna de las facturas indicadas está preparada"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_cargue_without_dataset_asks_for_preparar() {
+        let db = TestDb::new();
+        let ctx = AppContext::for_tests(&db);
+        let err = run_verificar_phase(&ctx, &PhaseRequest::new(CARGUE)).expect_err("no dataset");
+        assert!(err.to_string().contains("convenio preparar"), "{err}");
+    }
+
+    #[test]
+    fn the_command_exits_non_zero_when_an_invoice_is_not_ok() {
+        let db = TestDb::new();
+        let ctx = AppContext::for_tests(&db);
+        seed(&ctx);
+        store_dataset(&ctx, &db);
+
+        let err = fev::run(&ctx, parse(&[])).expect_err("mismatches");
+        assert_eq!(
+            err.to_string(),
+            "2 factura(s) sin valor coincidente entre XML y convenio"
+        );
+        // Only the matching invoice: success.
+        assert!(fev::run(&ctx, parse(&["--invoices", "fev1"])).is_ok());
+    }
+}
