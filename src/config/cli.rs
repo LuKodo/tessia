@@ -34,14 +34,14 @@ fn check(settings: &Settings, required: &[String]) -> Result<()> {
     let key_width = rows.iter().map(|r| r.key.len()).max().unwrap_or(0);
     let env_width = rows.iter().map(|r| r.env.len()).max().unwrap_or(0);
     println!(
-        "{:<key_width$}  {:<env_width$}  {:<5}  TIPO",
+        "{:<key_width$}  {:<env_width$}  {:<6}  TIPO",
         "CLAVE", "VARIABLE", "ESTADO"
     );
     for row in &rows {
         let status = if row.set { "set" } else { "unset" };
         let kind = if row.secret { "secreto" } else { "" };
         println!(
-            "{:<key_width$}  {:<env_width$}  {status:<5}  {kind}",
+            "{:<key_width$}  {:<env_width$}  {status:<6}  {kind}",
             row.key, row.env
         );
     }
