@@ -33,6 +33,18 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    portal_hallazgo (codigo) {
+        codigo -> Text,
+        detalle -> Nullable<Text>,
+        genera_glosa -> Bool,
+        devolucion -> Bool,
+        descripcion -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
 /// The portal row of one upload (`core/filtersAll` "contenido" item).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Record {
@@ -71,6 +83,34 @@ pub struct Finding {
     pub kind: String,
     pub field: String,
     pub detail: String,
+}
+
+/// One entry of the catalog of portal findings (`portal_hallazgo`): the code
+/// and detail come from the stored findings, the other three are edited by the
+/// user.
+#[derive(Debug, Clone, Default, PartialEq, Eq, QueryableByName)]
+pub struct CatalogItem {
+    #[diesel(sql_type = Text)]
+    pub code: String,
+    #[diesel(sql_type = Nullable<Text>)]
+    detail: Option<String>,
+    #[diesel(sql_type = Bool)]
+    pub generates_glosa: bool,
+    /// The payer returns the invoice because of this finding.
+    #[diesel(sql_type = Bool)]
+    pub returns: bool,
+    #[diesel(sql_type = Nullable<Text>)]
+    description: Option<String>,
+}
+
+impl CatalogItem {
+    pub fn detail(&self) -> &str {
+        self.detail.as_deref().unwrap_or_default()
+    }
+
+    pub fn description(&self) -> &str {
+        self.description.as_deref().unwrap_or_default()
+    }
 }
 
 /// What the portal reported at one query, ready to be stored.
@@ -271,6 +311,12 @@ const HEADER_SELECT: &str = "SELECT estado, remision, fecha_cargue, fecha_cargue
 /// Rows of one multi-row INSERT of findings.
 const FINDINGS_BATCH: usize = 200;
 
+/// Longest finding code kept in the catalog (characters).
+const MAX_CODE_CHARS: usize = 100;
+
+const CATALOG_COLUMNS: &str = "codigo AS code, detalle AS detail, genera_glosa AS generates_glosa, \
+ devolucion AS returns, descripcion AS description";
+
 fn non_empty(text: &str) -> Option<&str> {
     (!text.is_empty()).then_some(text)
 }
@@ -346,7 +392,45 @@ impl PortalStore {
                     .collect();
                 diesel::insert_into(d::table).values(&rows).execute(conn)?;
             }
-            Ok(())
+            register_catalog(conn, &snapshot.findings)
+        })
+    }
+
+    /// The catalog of portal findings ordered by code.
+    pub fn catalog(&self) -> DbResult<Vec<CatalogItem>> {
+        self.pool.run("list findings catalog", |conn| {
+            Ok(diesel::sql_query(format!(
+                "SELECT {CATALOG_COLUMNS} FROM portal_hallazgo ORDER BY codigo COLLATE \"C\""
+            ))
+            .load::<CatalogItem>(conn)?)
+        })
+    }
+
+    /// Sets `genera_glosa` and `descripcion` (stored trimmed, empty as NULL) of
+    /// an existing code; `devolucion == None` keeps the stored value, so a
+    /// client that does not know the field never resets it. Returns the stored
+    /// entry, or `None` when the code is not in the catalog (entries are only
+    /// created by the portal queries).
+    pub fn update_catalog(
+        &self,
+        code: &str,
+        generates_glosa: bool,
+        returns: Option<bool>,
+        description: &str,
+    ) -> DbResult<Option<CatalogItem>> {
+        let description = non_empty(description.trim());
+        self.pool.run("update findings catalog", |conn| {
+            Ok(diesel::sql_query(format!(
+                "UPDATE portal_hallazgo SET genera_glosa = $1, descripcion = $2, \
+                 devolucion = COALESCE($3, devolucion), updated_at = now() \
+                 WHERE codigo = $4 RETURNING {CATALOG_COLUMNS}"
+            ))
+            .bind::<Bool, _>(generates_glosa)
+            .bind::<Nullable<Text>, _>(description)
+            .bind::<Nullable<Bool>, _>(returns)
+            .bind::<Text, _>(code)
+            .get_result::<CatalogItem>(conn)
+            .optional()?)
         })
     }
 
@@ -406,6 +490,35 @@ impl PortalStore {
             }))
         })
     }
+}
+
+/// Adds the distinct, non-empty finding codes to the catalog with
+/// `ON CONFLICT DO NOTHING`, so an existing code keeps its detail, `genera_glosa`
+/// and `descripcion` (the first detail ever seen wins). Runs in the caller's
+/// transaction. Codes are inserted in ascending order, so two concurrent saves
+/// with overlapping codes take their key locks in the same order and never
+/// deadlock.
+fn register_catalog(conn: &mut PgConnection, findings: &[Finding]) -> DbResult<()> {
+    let mut first_detail: std::collections::BTreeMap<String, &str> = Default::default();
+    for f in findings {
+        let code: String = f.code.trim().chars().take(MAX_CODE_CHARS).collect();
+        if !code.is_empty() {
+            first_detail.entry(code).or_insert(f.detail.as_str());
+        }
+    }
+    let entries: Vec<(&String, &&str)> = first_detail.iter().collect();
+    use portal_hallazgo as h;
+    for part in entries.chunks(FINDINGS_BATCH) {
+        let rows: Vec<_> = part
+            .iter()
+            .map(|(code, detail)| (h::codigo.eq(code.as_str()), h::detalle.eq(Some(**detail))))
+            .collect();
+        diesel::insert_into(h::table)
+            .values(&rows)
+            .on_conflict_do_nothing()
+            .execute(conn)?;
+    }
+    Ok(())
 }
 
 /// Wait before each portal query of one invoice: 10 s, 15 s and 30 s, then
@@ -909,5 +1022,178 @@ mod tests {
         assert_eq!(schedule.len(), 12);
         assert_eq!(&schedule[..4], [10, 15, 30, 60].map(Duration::from_secs));
         assert_eq!(schedule.iter().sum::<Duration>(), Duration::from_secs(595));
+    }
+
+    fn found(invoice: &str, findings: Vec<Finding>) -> Snapshot {
+        Snapshot {
+            record: record(invoice, "VALIDADO_CON_ADVERTENCIA"),
+            findings,
+            found: true,
+            queries: 1,
+            ..Snapshot::default()
+        }
+    }
+
+    fn detailed(code: &str, detail: &str) -> Finding {
+        Finding {
+            detail: detail.into(),
+            ..finding(code, "ADVERTENCIA")
+        }
+    }
+
+    #[test]
+    fn save_registers_each_code_once_and_the_first_detail_wins() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found(
+                "FEV1",
+                vec![
+                    detailed(" RVC012 ", "primero"),
+                    detailed("RVC012", "segundo"),
+                    detailed("", "sin codigo"),
+                    detailed("AAA001", "otro"),
+                ],
+            ))
+            .expect("save");
+        store
+            .save(&found("FEV2", vec![detailed("RVC012", "tercero")]))
+            .expect("save again");
+        let catalog = store.catalog().expect("catalog");
+        let seen: Vec<(&str, &str)> = catalog
+            .iter()
+            .map(|c| (c.code.as_str(), c.detail()))
+            .collect();
+        assert_eq!(seen, [("AAA001", "otro"), ("RVC012", "primero")]);
+        assert!(catalog.iter().all(|c| !c.generates_glosa && !c.returns));
+        assert!(catalog.iter().all(|c| c.description().is_empty()));
+    }
+
+    #[test]
+    fn saving_again_keeps_what_the_user_edited() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "primero")]))
+            .expect("save");
+        store
+            .update_catalog("RVC012", true, Some(true), "  nota  ")
+            .expect("update")
+            .expect("exists");
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "cambiado")]))
+            .expect("save again");
+        let item = &store.catalog().expect("catalog")[0];
+        assert_eq!(
+            (
+                item.detail(),
+                item.generates_glosa,
+                item.returns,
+                item.description()
+            ),
+            ("primero", true, true, "nota")
+        );
+    }
+
+    #[test]
+    fn a_save_without_findings_or_codes_adds_nothing() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store.save(&found("FEV1", Vec::new())).expect("save");
+        store
+            .save(&found("FEV2", vec![detailed("  ", "x")]))
+            .expect("save");
+        assert!(store.catalog().expect("catalog").is_empty());
+    }
+
+    #[test]
+    fn long_codes_are_cut_to_one_hundred_characters() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed(&"A".repeat(150), "x")]))
+            .expect("save");
+        assert_eq!(store.catalog().expect("catalog")[0].code, "A".repeat(100));
+    }
+
+    #[test]
+    fn update_keeps_devolucion_when_absent_and_stores_empty_text_as_null() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "d")]))
+            .expect("save");
+        let first = store
+            .update_catalog("RVC012", true, Some(true), "texto")
+            .expect("update")
+            .expect("exists");
+        assert!(first.generates_glosa && first.returns);
+        let second = store
+            .update_catalog("RVC012", false, None, "   ")
+            .expect("update")
+            .expect("exists");
+        assert!(!second.generates_glosa && second.returns, "devolucion kept");
+        assert_eq!(second.description, None, "blank text is NULL");
+        let third = store
+            .update_catalog("RVC012", false, Some(false), "")
+            .expect("update")
+            .expect("exists");
+        assert!(!third.returns);
+        assert_eq!(
+            store
+                .update_catalog("NOPE", true, None, "")
+                .expect("update"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_catalog_is_ordered_by_code() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found(
+                "FEV1",
+                vec![
+                    detailed("B2", "x"),
+                    detailed("A10", "x"),
+                    detailed("A2", "x"),
+                ],
+            ))
+            .expect("save");
+        let codes: Vec<String> = store
+            .catalog()
+            .expect("catalog")
+            .into_iter()
+            .map(|c| c.code)
+            .collect();
+        assert_eq!(codes, ["A10", "A2", "B2"]);
+    }
+
+    #[test]
+    fn the_migration_seeds_the_catalog_from_the_stored_findings() {
+        let db = TestDb::new();
+        let up = include_str!("../../../migrations/2026-10-24-010000_portal_hallazgo/up.sql");
+        let seed = &up[up
+            .find("INSERT INTO portal_hallazgo")
+            .expect("seed statement")..];
+        let mut conn = db.conn();
+        diesel::sql_query(
+            "INSERT INTO portal_cargue_detalle (num_factura, orden, codigo, detalle) VALUES \
+             ('FEV1', 0, 'RVC012', 'zeta'), ('FEV2', 0, ' RVC012 ', 'alfa'), \
+             ('FEV2', 1, 'ABC1', NULL), ('FEV2', 2, '', 'sin codigo'), ('FEV2', 3, '   ', 'blank')",
+        )
+        .execute(&mut conn)
+        .expect("findings");
+        diesel::sql_query(seed).execute(&mut conn).expect("seed");
+        diesel::sql_query(seed)
+            .execute(&mut conn)
+            .expect("seed is idempotent");
+        let catalog = PortalStore::new(db.pool()).catalog().expect("catalog");
+        let seen: Vec<(&str, &str)> = catalog
+            .iter()
+            .map(|c| (c.code.as_str(), c.detail()))
+            .collect();
+        assert_eq!(seen, [("ABC1", ""), ("RVC012", "alfa")]);
     }
 }
