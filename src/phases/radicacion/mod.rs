@@ -23,6 +23,7 @@ pub mod confirm;
 pub mod engine;
 pub mod files;
 pub mod model;
+pub mod portal;
 pub mod recheck;
 pub mod rules;
 pub mod timings;
@@ -62,6 +63,8 @@ pub struct RunOptions {
     pub engine: Config,
     /// Follow the portal result of each RIPS JSON upload in the background.
     pub portal_follow: bool,
+    /// Waits between portal queries of one invoice (empty = 10 s, 15 s, 30 s, then 60 s x 9).
+    pub portal_schedule: Vec<Duration>,
 }
 
 /// What [`run_cargue`] did.
@@ -84,6 +87,7 @@ fn run_command(ctx: &AppContext, args: &cli::RunArgs) -> Result<()> {
     let opts = RunOptions {
         engine: engine_config(args),
         portal_follow: args.portal_follow,
+        portal_schedule: Vec::new(),
     };
     let requested = (!invoices.is_empty()).then_some(invoices.as_slice());
     let Some(outcome) = run_cargue(ctx, cargue_id, requested, &opts)? else {
@@ -328,7 +332,8 @@ pub fn run_cargue(
 ) -> Result<Option<RunOutcome>> {
     let nit = nit(ctx)?;
     let timings = Arc::new(Timings::new());
-    let api: Arc<dyn RadApi> = Arc::new(build_client(ctx, &nit, Some(timings.clone()))?);
+    let client = Arc::new(build_client(ctx, &nit, Some(timings.clone()))?);
+    let api: Arc<dyn RadApi> = client.clone();
     let _lease = LeaseKeeper::start(ctx, cargue_id)?;
     let workdir = ctx.workdir(cargue_id)?;
     let files = ArtifactFiles::load(
@@ -354,12 +359,27 @@ pub fn run_cargue(
         Some(Arc::new(values)),
         timings.clone(),
     );
-    deps.on_uploaded = None;
+    let follower = opts.portal_follow.then(|| {
+        Arc::new(portal::Follower::start(
+            client.clone(),
+            portal::PortalStore::new(ctx.pool.clone()),
+            opts.portal_schedule.clone(),
+        ))
+    });
+    deps.on_uploaded = follower.clone().map(portal_hook);
     let cfg = Config {
         nit,
         ..opts.engine.clone()
     };
-    let report = Engine::new(cfg, deps).run(cargue_id, &invoices)?;
+    let report = Engine::new(cfg, deps).run(cargue_id, &invoices);
+    if let Some(follower) = &follower {
+        tracing::info!(
+            max_s = portal::DRAIN.as_secs(),
+            "waiting for the portal follow-up"
+        );
+        follower.close(portal::DRAIN);
+    }
+    let report = report?;
     let snapshot = timings.snapshot();
     snapshot.log();
     publish_timings(ctx, cargue_id, &snapshot);
@@ -367,6 +387,16 @@ pub fn run_cargue(
         report,
         timings: snapshot,
     }))
+}
+
+/// The engine hook of the portal follow-up: only the RIPS JSON upload (step 3)
+/// is followed.
+fn portal_hook(follower: Arc<portal::Follower>) -> engine::UploadedHook {
+    Arc::new(move |invoice, step| {
+        if step == Step::Rips {
+            follower.enqueue(invoice);
+        }
+    })
 }
 
 /// Keeps the timings as an artifact of the cargue; a failure is only logged

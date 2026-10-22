@@ -811,12 +811,7 @@ fn the_precheck_is_skipped_for_steps_reached_in_this_run() {
     assert_eq!(report.done, ["FEV1"]);
     // Steps 3 and 4 each query filtersAll once, to confirm: no pre-checks.
     let calls = h.portal.filters_calls.load(Ordering::SeqCst);
-    assert!((2..=4).contains(&calls) && calls < 4, "{calls}");
-    let skipped_calls = calls;
-    assert_eq!(
-        skipped_calls, 2,
-        "pre-checks were skipped: {skipped_calls} calls"
-    );
+    assert_eq!(calls, 2, "pre-checks were skipped, got {calls} calls");
 }
 
 #[test]

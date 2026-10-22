@@ -21,6 +21,9 @@ use super::api::{ApiError, ApiResult, RadApi};
 use super::model::{
     FileDetail, FiltersAllItem, Load, LoadFile, Message, SupportDocument, UploadFile, XmlDocument,
 };
+use super::portal::{
+    Finding as PortalFinding, PortalApi, Record as PortalRecord, choose_record, parse_uploaded_at,
+};
 use crate::domain::radicacion::Step;
 use crate::http::token::FetchedToken;
 use crate::http::{
@@ -604,6 +607,67 @@ impl RadApi for MutualSerClient {
                 detail: field(d, "detalle"),
             })
             .collect())
+    }
+}
+
+impl PortalApi for MutualSerClient {
+    /// Sends the same `core/filtersAll` request as [`RadApi::filters_all`],
+    /// parses every row and returns the one [`choose_record`] picks.
+    fn portal_record(&self, invoice: &str) -> ApiResult<Option<PortalRecord>> {
+        let body = self.filters_all_body(invoice);
+        let (answer, _) = self.call_json(Method::POST, "/core/filtersAll", &[], Some(&body))?;
+        let rows: Vec<PortalRecord> = answer
+            .get("contenido")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .map(portal_row)
+            .collect();
+        Ok(choose_record(rows, invoice))
+    }
+
+    fn file_findings(&self, file_id: &str) -> ApiResult<Vec<PortalFinding>> {
+        Ok(self
+            .file_details(file_id)?
+            .into_iter()
+            .map(|d| PortalFinding {
+                code: d.code,
+                kind: d.kind,
+                field: d.field,
+                detail: d.detail,
+            })
+            .collect())
+    }
+}
+
+/// A `core/filtersAll` row with every field the portal follow-up keeps.
+fn portal_row(row: &Value) -> PortalRecord {
+    let uploaded_at_text = field(row, "fecha_cargue");
+    PortalRecord {
+        invoice: field(row, "numero_factura"),
+        status: field(row, "estado"),
+        remission: field(row, "remision"),
+        uploaded_at: parse_uploaded_at(&uploaded_at_text),
+        uploaded_at_text,
+        user: field(row, "usuario"),
+        services: services_text(row.get("servicios")),
+        modality: field(row, "modalidad"),
+        file_name: field(row, "nombreArchivo"),
+        file_id: field(row, "idArchivo"),
+        upload_id: field(row, "idCargue"),
+        event_id: field(row, "id_evento"),
+        event_type: field(row, "tipoEvento"),
+        error_type: field(row, "tipoError"),
+        error_code: field(row, "codigoError"),
+        returned: flex_bool(row.get("devuelto")),
+        issue_date: field(row, "fecha_expedicion_factura"),
+        receipt_name: field(row, "receipt_name"),
+        support_document: row
+            .get("documento_soporte")
+            .filter(|s| s.is_object())
+            .map(Value::to_string)
+            .unwrap_or_default(),
+        raw: row.to_string(),
     }
 }
 
@@ -1237,6 +1301,58 @@ mod tests {
         });
         assert_eq!(
             client_for(&none).filters_all("FEV1").expect("filters"),
+            None
+        );
+    }
+
+    #[test]
+    fn portal_record_picks_the_json_row_and_keeps_every_field() {
+        let answer = r#"{"contenido":[
+            {"numero_factura":"FEV1","estado":"OTRO","nombreArchivo":"CRC.zip","fecha_cargue":"29-09-2026 18:00:00"},
+            {"numero_factura":"FEV1","estado":"VALIDADO_CON_ADVERTENCIA","remision":"R7","fecha_cargue":"29-09-2026 17:01:26",
+             "usuario":"ops@example.org","servicios":"[1]","modalidad":"EVENTO","nombreArchivo":"FEV1.json",
+             "idArchivo":"f1","idCargue":"c1","id_evento":9,"tipoEvento":"REGISTER_RIP","tipoError":"E","codigoError":"X1",
+             "devuelto":false,"fecha_expedicion_factura":"2026-09-01","receipt_name":"rc",
+             "documento_soporte":{"id":"s1"}}]}"#;
+        let server = MockServer::start(move |req| {
+            login_ok(req).unwrap_or_else(|| MockResponse::json(200, answer))
+        });
+        let record = client_for(&server)
+            .portal_record("FEV1")
+            .expect("record")
+            .expect("found");
+        assert_eq!(
+            (record.status.as_str(), record.remission.as_str()),
+            ("VALIDADO_CON_ADVERTENCIA", "R7")
+        );
+        assert_eq!(record.uploaded_at_text, "29-09-2026 17:01:26");
+        assert_eq!(
+            record.uploaded_at.map(|d| d.to_rfc3339()),
+            Some("2026-09-29T22:01:26+00:00".to_owned())
+        );
+        assert_eq!(
+            (
+                record.file_id.as_str(),
+                record.upload_id.as_str(),
+                record.event_id.as_str()
+            ),
+            ("f1", "c1", "9")
+        );
+        assert_eq!(
+            (
+                record.event_type.as_str(),
+                record.error_type.as_str(),
+                record.error_code.as_str()
+            ),
+            ("REGISTER_RIP", "E", "X1")
+        );
+        assert_eq!(record.support_document, r#"{"id":"s1"}"#);
+        assert!(record.raw.contains(r#""numero_factura":"FEV1""#));
+        let none = MockServer::start(|req| {
+            login_ok(req).unwrap_or_else(|| MockResponse::json(200, r#"{"contenido":[]}"#))
+        });
+        assert_eq!(
+            client_for(&none).portal_record("FEV1").expect("record"),
             None
         );
     }

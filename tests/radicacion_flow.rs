@@ -16,6 +16,7 @@ use tessia::domain::dataset::test_support::{DatasetBuilder, InvoiceBuilder};
 use tessia::domain::radicacion::{RadStatus, Step};
 use tessia::phases::common::PhaseRequest;
 use tessia::phases::radicacion::engine::{Config, Wait};
+use tessia::phases::radicacion::portal::PortalStore;
 use tessia::phases::radicacion::{self, RunOptions, TIMINGS_ARTIFACT};
 use tessia::stores::dataset::DatasetStore;
 use tessia::stores::dataset::test_support::seed_cargue;
@@ -127,12 +128,20 @@ fn portal_handler(state: Arc<Mutex<Portal>>) -> impl Fn(&RecordedRequest) -> Moc
                     return MockResponse::json(200, r#"{"contenido":[]}"#);
                 }
                 let crc = portal.crc.contains(&invoice);
-                let mut row = json!({"numero_factura": invoice, "estado": "VALIDADO", "servicios": "[1]", "isSupportDocument": crc});
+                let mut row = json!({
+                    "numero_factura": invoice, "estado": "VALIDADO_CON_ADVERTENCIA", "servicios": "[1]", "isSupportDocument": crc,
+                    "nombreArchivo": format!("{invoice}.json"), "idArchivo": format!("f-{invoice}"),
+                    "fecha_cargue": "29-09-2026 17:01:26"
+                });
                 if crc {
                     row["documento_soporte"] = json!({"id": "s1", "estado": "ACTIVE"});
                 }
                 MockResponse::json(200, &json!({"contenido": [row]}).to_string())
             }
+            p if p.starts_with("/rips-api/core/findDetailsByFile/") => MockResponse::json(
+                200,
+                r#"[{"codigo":"A1","tipo":"ADVERTENCIA","campo":"edad","detalle":"revisar"}]"#,
+            ),
             _ => MockResponse::text(404, ""),
         }
     }
@@ -172,6 +181,7 @@ fn fast_options() -> RunOptions {
             ..Config::default()
         },
         portal_follow: false,
+        portal_schedule: Vec::new(),
     }
 }
 
@@ -433,4 +443,37 @@ fn recheck_step2_records_a_rejected_cuv_as_an_adjustment_note() {
         ),
     };
     assert!(radicacion::run(&f.ctx, empty).is_err());
+}
+
+#[test]
+fn portal_follow_stores_the_portal_state_of_each_uploaded_rips_json() {
+    let f = fixture(&[("FEV1", "1000.00", "1000")]);
+    let mut opts = fast_options();
+    opts.portal_follow = true;
+    opts.portal_schedule = vec![Duration::from_millis(20); 3];
+    let report =
+        radicacion::run_phase_with(&f.ctx, &PhaseRequest::new(CARGUE), &opts).expect("run");
+    assert_eq!(report.outcomes[0].outcome.state, PhaseState::Done);
+    let stored = PortalStore::new(f.db.pool())
+        .get("FEV1")
+        .expect("get")
+        .expect("followed");
+    assert_eq!(stored.record.status, "VALIDADO_CON_ADVERTENCIA");
+    assert!(stored.is_final);
+    assert_eq!(
+        (stored.warnings, stored.errors, stored.findings.len()),
+        (1, 0, 1)
+    );
+    assert_eq!(f.calls("/findDetailsByFile/f-FEV1"), 1);
+
+    // Off by default: the other cargue-less run makes no portal calls.
+    let f = fixture(&[("FEV1", "1000.00", "1000")]);
+    radicacion::run_phase_with(&f.ctx, &PhaseRequest::new(CARGUE), &fast_options()).expect("run");
+    assert_eq!(f.calls("/findDetailsByFile/f-FEV1"), 0);
+    assert!(
+        PortalStore::new(f.db.pool())
+            .get("FEV1")
+            .expect("get")
+            .is_none()
+    );
 }
