@@ -2,6 +2,7 @@
 
 pub mod cargues;
 pub mod consulta;
+pub mod derive;
 pub mod hallazgos;
 pub mod informe;
 pub mod portal;
