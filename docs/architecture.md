@@ -13,11 +13,12 @@ writers that start from the foundation.
 1. [Build prerequisites](#build-prerequisites)
 2. [Module map](#module-map)
 3. [Public API by module](#public-api-by-module)
-4. [How a phase is written](#how-a-phase-is-written)
-5. [Adding tables and migrations](#adding-tables-and-migrations)
-6. [Writing tests](#writing-tests)
-7. [Conventions](#conventions)
-8. [Go behavior intentionally not ported](#go-behavior-intentionally-not-ported)
+4. [Dataset store](#dataset-store)
+5. [How a phase is written](#how-a-phase-is-written)
+6. [Adding tables and migrations](#adding-tables-and-migrations)
+7. [Writing tests](#writing-tests)
+8. [Conventions](#conventions)
+9. [Go behavior intentionally not ported](#go-behavior-intentionally-not-ported)
 
 ## Build prerequisites
 
@@ -50,9 +51,10 @@ src/
   build.rs           re-embeds migrations when migrations/ changes
   config/            Settings (get/require/is_set), key registry, env file, `config check`
   db/                DbPool, DbError (+ is_transient), with_retry, embedded migrations, TestDb, `db migrate`
-  domain/            pure types: invoice normalization, Phase/PhaseState/Outcome, cargue id, radicacion states
+  domain/            pure types: invoice normalization, Phase/PhaseState/Outcome, cargue id, radicacion states,
+                     dataset (Dataset/Invoice/Line + test builders)
   stores/            Diesel stores, one directory (and schema.rs) each:
-                     cargues, artefactos, proceso, radicacion, derechos, parametros, valor_xml, leases
+                     cargues, artefactos, proceso, radicacion, derechos, parametros, valor_xml, leases, dataset
   storage/           ObjectStore trait, CassandraStore, MemoryStore, Artifacts service, Workdir
   nt/                NtCatalog trait, RedisNt, MemoryNt, NtRow
   http/              RetryPolicy + send_with_retry, AdaptiveLimiter (+ per-system numbers), TokenCache, client builder
@@ -147,6 +149,7 @@ clock. Money is `rust_decimal::Decimal` / `NUMERIC`.
 | `ParametrosStore` | `parametros` (singleton `id = 1`) | `get`, `get_or_default(fallback_amount)`, `set` (validates like Go) |
 | `ValorXmlStore` | `factura_valor_xml` | `sync_xml_total`, `stored_xml_total` (gate); `upsert_xml_values`, `stored_xml_values` (tracking) |
 | `LeaseStore` | `leases` | `acquire`, `renew`, `release`, `holder`, `guard` (RAII) |
+| `DatasetStore` | `dataset_*` | prepared convenio dataset: see [Dataset store](#dataset-store) |
 
 **Claims (`ProcesoStore`) are the multi-machine contract** (S3):
 
@@ -251,7 +254,7 @@ let resp = http::send_with_retry(&RetryPolicy::default(), limiter.as_deref(), ||
 ```rust
 let ctx = AppContext::from_settings(settings)?;   // connects, migrates, builds CassandraStore + RedisNt (lazy)
 ctx.settings; ctx.pool; ctx.objects; ctx.nt; ctx.workdir_root; ctx.owner /* host:pid:uuid */; ctx.limiters;
-ctx.proceso(); ctx.cargues(); ctx.radicacion(); ctx.derechos_cache(); ctx.parametros(); ctx.valor_xml(); ctx.leases();
+ctx.proceso(); ctx.cargues(); ctx.radicacion(); ctx.derechos_cache(); ctx.parametros(); ctx.valor_xml(); ctx.leases(); ctx.dataset();
 ctx.artifacts(); ctx.workdir(&cargue_id)?; ctx.claim_options(&cargue_id);
 // tests: AppContext::for_tests(&db).with_nt(Arc::new(MemoryNt::..)).with_objects(Arc::new(MemoryStore::new()))
 ```
@@ -273,6 +276,169 @@ pub fn run(ctx: &AppContext, args: Args) -> anyhow::Result<()>;                 
 `run_phase`. `CommonArgs` (`--cargue`, `--invoices a,b`, `--workers N`) can be flattened into a phase's
 clap `Args`. Each module's `cli.rs` already defines `Args` (struct, or struct + `Command` enum for
 `fev ajustar|verificar`, `cuv generar|barrer`, `radicacion run|recheck-step2`, ...) and is wired in `crate::cli`.
+
+## Dataset store
+
+The prepared convenio dataset (Go `cargue_preparacion`, `cargue_factura`, `cargue_factura_linea`,
+`cargue_actual`; `ValueTables.AgreementTotal`) in Postgres. `convenio preparar` writes it, `conciliar`
+rewrites invoices of it, every other phase reads it. Code: `src/domain/dataset.rs` (pure types, test
+builders), `src/stores/dataset/` (store, `schema.rs`, `test_support.rs`), migration
+`migrations/2026-10-23-000000_dataset_tables/`. `ctx.dataset()` gives the `DatasetStore`.
+
+### Identity: "cargue" is `cargues.seq`
+
+Every method takes `cargue: i64`, the `seq` of an upload in `CarguesStore` (a `Dataset` carries it in
+`ds.cargue`). A phase that only knows the load id (`PhaseRequest.cargue_id`, e.g.
+`Convenio_21102026_21102026`) resolves it with `current_cargue(load_id)` or reads straight through
+`read_current(load_id, subset)`. *Current* = the cargue the last `replace` made current (a pointer per load,
+`dataset_actual`), else the newest upload: an ingested-but-not-yet-prepared upload never hides the previous
+prepared dataset (Go `cargue_actual`). `ErrCargueSuperseded` stays in `CarguesStore::ingest`.
+
+### Types (`tessia::domain::dataset`)
+
+```rust
+Dataset     { cargue: i64, preparation: Preparation, invoices: Vec<Invoice>, excluded: Vec<Excluded>, manual_review: Vec<ManualReview> }
+Preparation { load: LoadInfo, source, max_amount: Option<Decimal>, automatic_subplans: Vec<String>,
+              nt_version: String /* Redis NT version pinned at prepare time */, prepared_format: bool,
+              prepared_at: Option<DateTime<Utc>> /* None on write = DB now() */, stats: Stats, skipped_lines: Vec<i64> }
+Invoice     { invoice /* normalized */, lines: Vec<Line>, conciliacion: Option<InvoiceAudit>, id_mipres, version: i64 }
+Line        { source_line, nit, plan, subplan, invoice, invoice_raw, doc_type, doc_number, beneficiary, point_of_sale,
+              formula_number, ssc, formula_type, date, lot, plu, article, quantity, unit_value, unit_cost, total_value,
+              copay, authorization, mipres, agreement_cum, diagnosis_code, diagnosis_name, causal_exento, ips,
+              prescriber_id, prescriber_name, gender, birth_date, department, municipality, classification, cum,
+              product_type, pharmaceutical_form, concentration, measure_unit, agreed_price,
+              conciliacion: Option<LineAudit>, extra: BTreeMap<String, serde_json::Value> }
+Excluded { invoice, reason }   ManualReview { invoice, code, reason } (+ .text() = "<code>: <reason>")
+Stats (Go Stats)   InvoiceState::{Prepared "PREPARADA", Excluded "EXCLUIDA", ManualReview "REVISION_MANUAL"}
+```
+
+* `Line` has **exactly the Go fields**, all `String` (the verbatim trimmed CSV text, e.g. `"1.234,56"`):
+  RIPS/soporte/conciliar print and compare them as written. For numbers use the accessors
+  `line.total_value_amount()`, `unit_value_amount()`, `copay_amount()`, `agreed_price_amount()` ->
+  `Result<Decimal, AmountError>` (`parse_agreement_amount` rules) and `invoice.agreement_total()`.
+  Anything without a typed field goes into `line.extra` (flattened JSON, round-trips).
+* `Line.invoice` and `Invoice.invoice` are the normalized number (`normalize_invoice`). `Line.date` etc. keep
+  the file's text.
+* `Invoice.version` is the optimistic-locking token: set by every read, `0` on invoices built in memory, ignored
+  by `replace`. `Dataset::{all_names, invoice(name), filtered(names)}` (`filtered` = Go `FilterDataset`),
+  `subset_names`, `sum_line_totals`, `Line::affiliate_key()`, `Invoice::subplan()` are the small helpers.
+* `max_amount: None` means "unset": fall back to `ctx.parametros().get_or_default(..)` (Go: dataset value, else
+  `convenio.max_invoice_amount`).
+* Storage: `dataset_linea.data` is the whole `Line` as JSONB (no 40-column table); `total_value` is copied
+  out for the agreement total. `dataset_factura` keeps `estado`, `orden` (one sequence for the three states),
+  `version`, `id_mipres`, `conciliacion` (JSONB).
+
+### `DatasetStore` methods
+
+```rust
+let store = ctx.dataset();            // DatasetStore::new(pool)
+
+// --- writes (preparar / conciliar)
+store.replace(&ds, false)?;           // whole dataset of ds.cargue; makes it the current cargue of its load
+store.replace(&ds, true)?;            // merge: invoices named in ds replace the stored ones, the rest are kept
+store.replace_touching(&ds, &requested)?; // merge with an explicit `touched` list (Go `--invoices`; also drops names ds lacks)
+store.update_invoices(cargue, &[(inv, inv.version)])?; // optimistic update, see below
+store.save_preparation(cargue, &preparation)?;         // header only (nt_version, stats, ...); does not move the pointer
+
+// --- reads
+let ds: Dataset = store.read(cargue, None)?;                       // everything; Err(NotFound) if no dataset
+let ds = store.read(cargue, Some(&["EVS1".into()]))?;              // subset (see rules below)
+let invoices: Vec<Invoice> = store.read_invoices(cargue, Some(&names))?; // prepared invoices WITH version
+let ds: Option<Dataset> = store.read_current("Convenio_21102026_21102026", Some(&names))?;
+let header: Option<Preparation> = store.preparation(cargue)?;       // no rows read
+let names: Vec<String> = store.invoice_names(cargue)?;             // prepared, stored order
+let excluded = store.names_with_state(cargue, InvoiceState::Excluded)?;
+let seq: Option<i64> = store.current_cargue("Convenio_21102026_21102026")?;
+let total: Option<Decimal> = store.agreement_total("evs-1")?;       // radicacion CheckValue
+```
+
+Rules ported from Go:
+
+* **`replace`** is one transaction: header upsert, invoices (position = prepared, then excluded, then manual
+  review, each in its order), lines, then the current-cargue pointer (a failed replace leaves the previous
+  current cargue). An invoice that was stored before comes back with `version + 1`; new ones start at `0`.
+  `ds` must not name an invoice twice (`DatasetError::Invalid`). `merge = true` (or a non-empty `touched`)
+  keeps the stored invoices not named, appends the new ones, keeps the **stored** `stats`/`skipped_lines`, ORs
+  `prepared_format`, takes the rest of the header from `ds`; a cargue with no dataset or stored for another
+  `load.id` is replaced as a whole. `ds.cargue` must exist in `cargues` (`DatasetError::CargueNotFound`).
+* **Subset reads** (`subset: Option<&[String]>`): `None` = everything; `Some(names)` = names normalized with
+  `normalize_invoice`, distinct, unknown ones absent; `invoices`/`excluded`/`manual_review` hold only those,
+  in stored order (not request order), with lines and versions; the header (`preparation`) is always the
+  whole dataset's. `Some(&[])` reads the header only. Equal to `read(..)` + `Dataset::filtered(..)` but only
+  the requested rows travel. A per-invoice phase (`--invoices <one>`) must use this.
+* **`agreement_total(invoice)`**: sum of `total_value` of the invoice's lines in the newest *current* cargue
+  that holds it as `PREPARADA` (highest cargue seq wins among loads; a PREPARADA invoice without lines is
+  `0`; excluded/manual/unknown is `None`). It is never stored. A line total that is not a readable amount is
+  `Err(DatasetError::Invalid(..))` (radicacion maps it to `VALIDACION_VALOR_NO_DISPONIBLE`). Two decimals.
+* Snapshots: `read` runs in one read-only repeatable-read transaction, so a concurrent `replace` is seen
+  whole or not at all.
+
+### How a phase reads and updates invoices
+
+```rust
+use tessia::stores::dataset::DatasetError;
+
+// Read-only phase (rips, soporte, derechos, ...): honour --invoices, take the header from the same read.
+let subset = req.invoices.as_deref();                    // Option<&[String]>
+let Some(ds) = ctx.dataset().read_current(&req.cargue_id, subset)? else { /* "no preparado" */ };
+let max = ds.preparation.max_amount;                     // Option<Decimal>
+let nt_version = &ds.preparation.nt_version;             // ask ctx.nt for rows of exactly this version
+for inv in &ds.invoices { /* inv.lines, inv.version */ }
+for ex in &ds.excluded { /* skip: reason ex.reason */ }
+```
+
+`update_invoices(cargue, &[(Invoice, expected_version)])` (Go `UpdateInvoices`): all-or-nothing; rows are
+locked in name order and every invoice is checked first (missing or not-prepared -> `InvoiceNotFound`,
+changed version -> `VersionConflict { invoice, stored, expected }`), nothing is written on failure; on
+success lines, MIPRES ids and reconciliation are replaced, the position is kept and each version grows by
+one. `Invoice::version` straight from the read is the expected version. Two invoices of different names never
+conflict; `preparar` never conflicts (it replaces), but its `replace` bumps versions, so a `conciliar` that
+read before it conflicts.
+
+**Version-conflict pattern** (retry the whole read-compute-write unit, not just the write; database
+transients such as deadlocks are already retried inside the store):
+
+```rust
+for attempt in 1..=3 {
+    let mut invoices = store.read_invoices(cargue, Some(&names))?;
+    let updates: Vec<(Invoice, i64)> = invoices.drain(..).map(|mut inv| { let v = inv.version; rebuild(&mut inv); (inv, v) }).collect();
+    match store.update_invoices(cargue, &updates) {
+        Ok(()) => break,
+        Err(e) if e.is_retryable() && attempt < 3 => continue,   // re-prepared meanwhile: read again
+        Err(e) => return Err(e.into()),                          // VersionConflict message is Spanish and user-facing
+    }
+}
+```
+
+If the expensive part is a network call (conciliar), do it once, then re-read only to detect a conflict: on
+`VersionConflict` for an invoice that preparar re-prepared, Go fails the run with the conflict message
+("vuelva a ejecutar el comando") instead of overwriting, which is also the right default here. `InvoiceNotFound`
+is not retryable.
+
+### Test datasets
+
+```rust
+use tessia::domain::dataset::test_support::{DatasetBuilder, InvoiceBuilder, sample_line};
+use tessia::stores::dataset::test_support::seed_cargue;
+
+let db = TestDb::new();
+let ctx = AppContext::for_tests(&db);
+let cargue = seed_cargue(&db.pool(), "Convenio_21102026_21102026", 'a'); // ingest into `cargues`, returns seq; another hash char = a newer upload
+let ds = DatasetBuilder::new(cargue)                    // load defaults to Convenio_21102026_21102026
+    .load("Convenio_21102026_21102026")                 // optional: set the load identity
+    .nt_version("v1").max_amount("1500000".parse()?)    // optional header fields (also prepared_format, prepared_at, stats)
+    .invoice(InvoiceBuilder::new("EVS1").line("10.50").line("5"))   // lines from sample_line(..): CC patient, 714 medicine, 1 unit
+    .invoice(InvoiceBuilder::new("EVS2").with_line(my_line).mipres("11, 22"))
+    .excluded("EVS3", "VALOR_SUPERA_MONTO")
+    .manual_review("EVS4", "MULTIPLES_AFILIADOS_EN_FACTURA", "dos afiliados")
+    .build();
+ctx.dataset().replace(&ds, false)?;
+```
+
+`DatasetBuilder`/`InvoiceBuilder` are pure (no database) when you only need an in-memory `Dataset`; a phase's
+own pure logic should take `&Dataset`/`&Invoice`/`&Line` so it is testable that way. Without the helper, build a
+`Line` with `Line { plu: "x".into(), ..Line::default() }`. Both modules are behind `cfg(any(test,
+feature = "test-support"))`, as `TestDb`. Integration tests of this store: `tests/dataset_store.rs`.
 
 ## How a phase is written
 
@@ -372,6 +538,6 @@ From S1/S2 (scope) and S3-S6 (design):
   names that a copied Go env file may still list).
 * The xlsx/SQLite NT load and the `nota_tecnica_*` tables: the NT comes from Redis, read-only.
 * `tessia.log` and the legacy log retirement; the live `proceso` panel and trace files.
-* Not part of the foundation (owned by later tasks): the dataset tables (`cargue_linea`,
-  `cargue_factura*`, the `cargue_actual` pointer, the agreement-total query), TLS leaf pinning, and the
-  `diario` (previous-day cron) entry point, which is new behavior (Wave 3).
+* Not part of the foundation (owned by later tasks): TLS leaf pinning, and the `diario` (previous-day
+  cron) entry point, which is new behavior (Wave 3). The dataset tables are the
+  [Dataset store](#dataset-store) (task T1b).

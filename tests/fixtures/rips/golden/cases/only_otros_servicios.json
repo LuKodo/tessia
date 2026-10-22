@@ -1,0 +1,46 @@
+{
+  "numDocumentoIdObligado": "806011811",
+  "numFactura": "FVS1000002",
+  "tipoNota": null,
+  "numNota": null,
+  "usuarios": [
+    {
+      "tipoDocumentoIdentificacion": "TI",
+      "numDocumentoIdentificacion": "900000002",
+      "tipoUsuario": "04",
+      "fechaNacimiento": "2010-05-05",
+      "codSexo": "M",
+      "codPaisResidencia": "031",
+      "codMunicipioResidencia": "13430",
+      "codZonaTerritorialResidencia": "01",
+      "incapacidad": "NO",
+      "consecutivo": 1,
+      "codPaisOrigen": "031",
+      "registroSIRAS": null,
+      "servicios": {
+        "otrosServicios": [
+          {
+            "codPrestador": "130018500201",
+            "numAutorizacion": "",
+            "idMIPRES": null,
+            "fechaSuministroTecnologia": "2026-09-04 08:00",
+            "tipoOS": "01",
+            "codTecnologiaSalud": "OS-1",
+            "nomTecnologiaSalud": "PAÑAL ADULTO",
+            "cantidadOS": 30,
+            "tipoDocumentoIdentificacion": "CC",
+            "numDocumentoIdentificacion": "11111111",
+            "vrUnitOS": 900,
+            "vrDispensacion": 0,
+            "vrServicio": 27000,
+            "conceptoRecaudo": "05",
+            "valorPagoModerador": 0,
+            "numFEVPagoModerador": null,
+            "codigoVIDA": null,
+            "consecutivo": 1
+          }
+        ]
+      }
+    }
+  ]
+}
