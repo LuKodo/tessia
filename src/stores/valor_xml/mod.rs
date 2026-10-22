@@ -58,6 +58,9 @@ pub struct XmlValueUpsert {
     pub size: i64,
 }
 
+/// `(num_factura, xml_valor, xml_mtime, xml_size)`.
+type TrackingRow = (String, Option<Decimal>, Option<i64>, Option<i64>);
+
 #[derive(Clone)]
 pub struct ValorXmlStore {
     pool: DbPool,
@@ -152,13 +155,12 @@ impl ValorXmlStore {
         keys.dedup();
         let mut out = HashMap::new();
         for part in chunks(&keys) {
-            let rows: Vec<(String, Option<Decimal>, Option<i64>, Option<i64>)> =
-                self.pool.run("stored xml values", |conn| {
-                    Ok(t::table
-                        .filter(t::num_factura.eq_any(part))
-                        .select((t::num_factura, t::xml_valor, t::xml_mtime, t::xml_size))
-                        .load(conn)?)
-                })?;
+            let rows: Vec<TrackingRow> = self.pool.run("stored xml values", |conn| {
+                Ok(t::table
+                    .filter(t::num_factura.eq_any(part))
+                    .select((t::num_factura, t::xml_valor, t::xml_mtime, t::xml_size))
+                    .load(conn)?)
+            })?;
             for (key, amount, mtime, size) in rows {
                 let stamp = mtime.zip(size);
                 out.insert(key, XmlValue { amount, stamp });

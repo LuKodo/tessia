@@ -35,6 +35,9 @@ pub struct RetryEvent {
     pub error: String,
 }
 
+/// Callback invoked before each backoff sleep.
+pub type RetryHook = Arc<dyn Fn(&RetryEvent) + Send + Sync>;
+
 /// Retry settings. `Default` is the Go default: 3 attempts, 250 ms doubling up
 /// to 10 s, +-20% jitter.
 #[derive(Clone)]
@@ -50,7 +53,7 @@ pub struct RetryPolicy {
     /// Also retry POST/PATCH on transport errors, 408 and 5xx.
     pub retry_non_idempotent: bool,
     /// Called right before each backoff sleep.
-    pub on_retry: Option<Arc<dyn Fn(&RetryEvent) + Send + Sync>>,
+    pub on_retry: Option<RetryHook>,
     /// Replaces `thread::sleep` (tests).
     pub sleeper: Option<Arc<dyn Fn(Duration) + Send + Sync>>,
 }

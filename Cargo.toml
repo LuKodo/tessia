@@ -24,9 +24,11 @@ chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.7", features = ["derive"] }
 crossbeam-channel = "0.5"
 csv = "1"
+ctrlc = { version = "3", features = ["termination"] }
 diesel = { version = "2.3.14", features = ["postgres", "r2d2", "chrono", "serde_json", "uuid"] }
 diesel_migrations = { version = "2.3.2", features = ["postgres"] }
 hex = "0.4"
+hostname = "0.4"
 md-5 = "0.10"
 # Statically builds libpq so the binary does not need a system libpq.
 pq-sys = { version = "0.7", features = ["bundled"] }

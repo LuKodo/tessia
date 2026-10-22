@@ -124,10 +124,10 @@ impl Settings {
     {
         let mut settings = Settings::default();
         for (name, value) in pairs {
-            if let Some(def) = keys::by_env_name(name.as_ref()) {
-                if !value.as_ref().is_empty() {
-                    settings.values.insert(def.key, value.as_ref().to_owned());
-                }
+            if let Some(def) =
+                keys::by_env_name(name.as_ref()).filter(|_| !value.as_ref().is_empty())
+            {
+                settings.values.insert(def.key, value.as_ref().to_owned());
             }
         }
         settings

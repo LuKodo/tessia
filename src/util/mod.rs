@@ -3,4 +3,5 @@
 pub mod decimal;
 pub mod fsx;
 pub mod gson;
+pub mod par;
 pub mod text;
