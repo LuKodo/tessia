@@ -60,6 +60,7 @@ fn run_phase_command(ctx: AppContext, command: Commands) -> Result<()> {
             command: ConvenioCommand::Preparar(args),
         } => convenio_preparar::run(&ctx, args),
         Commands::Proceso(args) => proceso::run(&ctx, args),
+        Commands::Diario(args) => proceso::diario::run(&ctx, args),
         Commands::Conciliar(args) => conciliar::run(&ctx, args),
         Commands::Thefactory(args) => thefactory::run(&ctx, args),
         Commands::Derechos(args) => derechos::run(&ctx, args),
