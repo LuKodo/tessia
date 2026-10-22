@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use super::error::{DatasetError, DatasetResult};
 use super::schema::{dataset_factura, dataset_linea, dataset_preparacion};
+use super::summary::InvoiceSummary;
 use crate::domain::dataset::{Invoice, InvoiceState, Line, Preparation, Stats};
 use crate::domain::{LoadInfo, LoadOrigin, normalize_invoice};
 
@@ -124,6 +125,11 @@ pub(super) struct NewFactura {
     pub orden: i32,
     pub conciliacion: Option<Value>,
     pub version: i64,
+    pub fecha_factura_txt: String,
+    pub ssc: String,
+    pub subplan: String,
+    pub autorizacion: String,
+    pub valor_convenio: Option<Decimal>,
 }
 
 /// `dataset_linea` as written.
@@ -146,6 +152,8 @@ pub(super) struct FacturaDraft {
     pub reason: String,
     pub mipres: String,
     pub audit: Option<Value>,
+    /// Stored summary columns (empty for excluded and manual-review invoices).
+    pub summary: InvoiceSummary,
 }
 
 impl FacturaDraft {
@@ -161,6 +169,11 @@ impl FacturaDraft {
             orden,
             conciliacion: self.audit,
             version,
+            fecha_factura_txt: self.summary.date,
+            ssc: self.summary.ssc,
+            subplan: self.summary.subplan,
+            autorizacion: self.summary.authorization,
+            valor_convenio: self.summary.agreement_value,
         }
     }
 }

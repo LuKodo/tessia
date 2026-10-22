@@ -327,6 +327,20 @@ Stats (Go Stats)   InvoiceState::{Prepared "PREPARADA", Excluded "EXCLUIDA", Man
 * Storage: `dataset_linea.data` is the whole `Line` as JSONB (no 40-column table); `total_value` is copied
   out for the agreement total. `dataset_factura` keeps `estado`, `orden` (one sequence for the three states),
   `version`, `id_mipres`, `conciliacion` (JSONB).
+* **Summary columns** (dashboard read models, migrations `2026-10-24-000100_dataset_factura_summary` and
+  `..000200_..._backfill`): Go filters, sorts and aggregates the dashboard over stored columns of
+  `cargue_factura`, so `dataset_factura` carries the same five: `fecha_factura_txt` (first non-blank line
+  `date`, trimmed, 10 characters), `ssc`, `subplan`, `autorizacion` (first non-blank line value, trimmed) and
+  `valor_convenio NUMERIC(18,2) NULL` (sum of the line totals with the `parse_agreement_amount` rules; `NULL`
+  when there are no lines or one total is unreadable). Chosen over deriving them from `dataset_linea.data` at
+  read time because the JSON route reads every line of every invoice per poll and cannot parse `1.234,56` in
+  SQL. Trade-off: five more columns per invoice and a rule that must stay in one place:
+  `stores::dataset::summary::summarize` is the only Rust implementation, called by `replace` (every write
+  path of `replace`, `replace_touching` and merge) and `update_invoices` (lines change, so the columns are
+  rewritten with them); the backfill migration applies the same rules in SQL to the rows stored before, and
+  `tests/dataset_store.rs` proves both give the same columns. Excluded and manual-review invoices have no
+  lines, so their columns stay empty (as in Go). Nothing else writes them: code that changes lines must go
+  through those two methods.
 
 ### `DatasetStore` methods
 
