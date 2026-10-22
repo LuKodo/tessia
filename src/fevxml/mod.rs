@@ -9,10 +9,6 @@
 //!
 //! The module has no dependency on the rest of the crate.
 
-// The consumers (thefactory, fev, cuv, conciliar, radicacion) are ported later;
-// drop this allow once they use the API.
-#![allow(dead_code, unused_imports)]
-
 mod ajuste;
 mod dom;
 mod download;
