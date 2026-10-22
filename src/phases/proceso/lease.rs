@@ -3,6 +3,7 @@
 //! while invoices are processed: that work is split between machines by the
 //! per-(invoice, phase) claims.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -38,16 +39,28 @@ pub fn with_lease<T: Send>(
         std::thread::sleep(poll);
     };
     let (stop, stopped) = crossbeam_channel::bounded::<()>(1);
+    let lost = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let heartbeat = scope.spawn(|| {
+            let mut errors = 0u32;
             while let Err(crossbeam_channel::RecvTimeoutError::Timeout) =
                 stopped.recv_timeout(RENEW_EVERY)
             {
                 match guard.renew() {
-                    Ok(true) => {}
-                    Ok(false) => tracing::warn!(lease = %name, "the lease was lost"),
+                    Ok(true) => errors = 0,
+                    Ok(false) => {
+                        tracing::warn!(lease = %name, "the lease was lost");
+                        lost.store(true, Ordering::SeqCst);
+                        break;
+                    }
                     Err(err) => {
-                        tracing::warn!(lease = %name, error = %err, "could not renew the lease")
+                        errors += 1;
+                        tracing::warn!(lease = %name, error = %err, "could not renew the lease");
+                        if errors * RENEW_EVERY.as_secs() as u32 >= TTL.as_secs() as u32 {
+                            tracing::warn!(lease = %name, "lease renewals failing for over the TTL; treating the lease as lost");
+                            lost.store(true, Ordering::SeqCst);
+                            break;
+                        }
                     }
                 }
             }
@@ -55,6 +68,11 @@ pub fn with_lease<T: Send>(
         let result = work();
         drop(stop);
         let _ = heartbeat.join();
+        if lost.load(Ordering::SeqCst) && result.is_ok() {
+            bail!(
+                "la máquina perdió el lease «{name}» mientras {what}; otra máquina pudo tomar el trabajo, así que este resultado no se usa"
+            );
+        }
         result
     })
 }
