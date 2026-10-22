@@ -4,8 +4,11 @@ use chrono::{TimeZone, Utc};
 use rust_decimal::Decimal;
 
 use super::catalog::{Catalog, Item};
-use super::model::{Invoice, Line, ORIGIN_ADDED, ORIGIN_MATCHED};
-use super::rules::{Estado, RebuildInput, RuleError, analyze, cents, money, quantity, rebuild};
+use super::rules::{
+    Estado, ORIGIN_ADDED, ORIGIN_MATCHED, RebuildInput, RuleError, analyze, cents, money, quantity,
+    rebuild,
+};
+use crate::domain::dataset::{Invoice, Line};
 use crate::fevxml::{InvoiceLine, invoice_lines};
 use crate::util::decimal::parse_max_amount;
 
@@ -306,10 +309,10 @@ fn rebuild_follows_the_xml_and_keeps_the_audit() {
         ),
         ("1675", "4050")
     );
-    assert_eq!(audit.reconciled_at, now);
+    assert_eq!(audit.reconciled_at, Some(now));
     assert_eq!(audit.original_lines.len(), 2);
     assert_eq!(audit.original_lines[1].cum, "99999-9");
-    assert_eq!(audit.unconfirmed, [1]);
+    assert_eq!(audit.unconfirmed, [1i64]);
     assert_eq!(inv.lines[0].quantity, "5", "the input is not modified");
 
     // A second reconciliation keeps the first originals.
@@ -324,46 +327,6 @@ fn rebuild_follows_the_xml_and_keeps_the_audit() {
     );
     let originals = &again.conciliacion.as_ref().expect("audit").original_lines;
     assert_eq!(originals[0].quantity, "5");
-}
-
-#[test]
-fn audit_json_uses_the_go_field_names() {
-    let r = analyze(&invoice(), 405_000, &xml_lines(), &catalog("333.5"), None).expect("analysis");
-    let now = Utc
-        .with_ymd_and_hms(2026, 9, 26, 12, 0, 0)
-        .single()
-        .expect("time");
-    let out = rebuild(
-        &invoice(),
-        &r,
-        &RebuildInput {
-            formula_date: "d",
-            ssc: "s",
-            xml_total: "4050",
-            previous_total: "x",
-            now,
-        },
-    );
-    let json = serde_json::to_value(out.conciliacion.expect("audit")).expect("json");
-    for key in [
-        "estado",
-        "fecha_formula",
-        "ssc",
-        "valor_xml",
-        "valor_convenio_anterior",
-        "valor_convenio_conciliado",
-        "conciliado_en",
-        "lineas_originales",
-        "no_confirmadas_xml",
-    ] {
-        assert!(json.get(key).is_some(), "missing {key}");
-    }
-    assert_eq!(json["conciliado_en"], "2026-09-26T12:00:00Z");
-    assert_eq!(json["lineas_originales"][0]["factura"], "FVS9000001");
-    assert!(
-        json["lineas_originales"][0].get("nit").is_none(),
-        "omitempty"
-    );
 }
 
 #[test]

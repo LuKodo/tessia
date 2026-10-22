@@ -13,9 +13,14 @@ use rust_decimal::{Decimal, RoundingStrategy};
 use thiserror::Error;
 
 use super::catalog::{Catalog, Item, normalize_code};
-use super::model::{Invoice, InvoiceAudit, Line, LineAudit, ORIGIN_ADDED, ORIGIN_MATCHED};
+use crate::domain::dataset::{Invoice, InvoiceAudit, Line, LineAudit};
 use crate::fevxml::InvoiceLine;
 use crate::util::decimal::{parse_plain, round2};
+
+/// Origin of a line updated from the XML (`LineAudit::origin`).
+pub const ORIGIN_MATCHED: &str = "CSV_CONCILIADO_XML";
+/// Origin of a line the convenio did not have.
+pub const ORIGIN_ADDED: &str = "LINEA_AGREGADA_DESDE_XML";
 
 /// Reconciliation states (`rips_medicar_conciliaciones.estado`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,6 +272,7 @@ pub fn rebuild(inv: &Invoice, res: &Analysis, input: &RebuildInput<'_>) -> Invoi
         invoice: inv.invoice.clone(),
         lines,
         id_mipres: inv.id_mipres.clone(),
+        version: inv.version,
         conciliacion: Some(InvoiceAudit {
             state: res.state.as_str().to_owned(),
             formula_date: input.formula_date.to_owned(),
@@ -274,9 +280,9 @@ pub fn rebuild(inv: &Invoice, res: &Analysis, input: &RebuildInput<'_>) -> Invoi
             xml_total: input.xml_total.to_owned(),
             previous_total: input.previous_total.to_owned(),
             reconciled_total: money(res.total),
-            reconciled_at: input.now,
+            reconciled_at: Some(input.now),
             original_lines: originals,
-            unconfirmed: res.unconfirmed.clone(),
+            unconfirmed: res.unconfirmed.iter().map(|i| *i as i64).collect(),
         }),
     }
 }

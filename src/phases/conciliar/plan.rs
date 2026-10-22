@@ -12,9 +12,9 @@ use rust_decimal::Decimal;
 
 use super::catalog::Catalog;
 use super::medicar::MedicarError;
-use super::model::Invoice;
 use super::portal_html::Formula;
 use super::rules::{Analysis, Estado, RebuildInput, analyze, cents, money, rebuild};
+use crate::domain::dataset::Invoice;
 use crate::domain::{Outcome, PhaseState};
 use crate::fevxml::{invoice_lines, numero_convenio, read_total};
 

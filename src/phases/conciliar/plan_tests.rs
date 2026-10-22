@@ -5,13 +5,13 @@ use rust_decimal::Decimal;
 
 use super::catalog::{Catalog, Item};
 use super::medicar::MedicarError;
-use super::model::{Invoice, Line};
 use super::plan::{
     Candidate, CountKey, Counts, Decision, Detail, Incomplete, OwnState, Pending, Rules,
     cuv_existente, decide, finish_pending, one_line,
 };
 use super::portal_html::Formula;
 use crate::domain::PhaseState;
+use crate::domain::dataset::{Invoice, Line};
 
 const FIXTURE: &str =
     include_str!("../../../tests/fixtures/fevxml/conciliacion/attached_3lineas.xml");
@@ -296,7 +296,7 @@ fn a_formula_date_rebuilds_the_invoice_and_marks_both_phases_done() {
         (audit.ssc.as_str(), audit.formula_date.as_str()),
         ("7770001", "2026-08-15 10:20:30")
     );
-    assert_eq!(audit.reconciled_at, now);
+    assert_eq!(audit.reconciled_at, Some(now));
     assert!(done.detail.is_none());
 }
 
