@@ -1,0 +1,27 @@
+[package]
+name = "tessia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+calamine = "0.37.0"
+chrono = "0.4.45"
+clap = { version = "4.6.7", features = ["derive"] }
+diesel = { version = "2.3.14", features = ["sqlite"] }
+diesel_migrations = { version = "2.3.2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.38.2", features = ["bundled"] }
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.28.0", features = ["v4"] }
+redis = { version = "1", features = ["tls-native-tls"] }
+serde_json = "1"
+
+[[bin]]
+name = "facturacion"
+path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3"
+zip = { version = "9", default-features = false }
