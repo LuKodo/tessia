@@ -197,3 +197,173 @@ fn nota_tecnica_failure_is_a_generic_503() {
     assert_eq!(error_of(&resp), "no se pudo consultar la nota técnica");
     assert!(!String::from_utf8_lossy(&resp.body).contains("secret"));
 }
+
+// --- parameters -------------------------------------------------------------------
+
+fn put_params(h: &Harness, body: &str) -> tessia::api::Response {
+    h.send(Request::new("PUT", "/api/parameters").with_body(body))
+}
+
+const VALID: &str = r#"{"max_invoice_amount":"250000.50","automatic_subplans":["Evento POS","Otro Plan"],"wave_size":10,"derechos_unavailable_percent":40,"derechos_min_sample":5,"cuv_token_failure_percent":30,"cuv_min_sample":6}"#;
+
+#[test]
+fn parameters_default_to_configured_false_with_the_configured_cap() {
+    let h = Harness::with_settings(|s| s.with("convenio.max_invoice_amount", " 1500000 "));
+    let resp = h.get("/api/parameters");
+    assert_eq!(resp.status, 200);
+    assert_eq!(
+        json(&resp),
+        json!({
+            "configured": false,
+            "max_invoice_amount": "1500000",
+            "automatic_subplans": ["EVENTO POS", "EVENTO NO PBS", "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION"],
+            "wave_size": 20,
+            "derechos_unavailable_percent": 50,
+            "derechos_min_sample": 4,
+            "cuv_token_failure_percent": 50,
+            "cuv_min_sample": 4
+        })
+    );
+    let blank = Harness::new();
+    assert_eq!(
+        json(&blank.get("/api/parameters"))["max_invoice_amount"],
+        ""
+    );
+}
+
+#[test]
+fn put_saves_and_get_returns_what_was_saved() {
+    let h = Harness::new();
+    let resp = put_params(&h, VALID);
+    assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
+    let expected = json!({
+        "configured": true,
+        "max_invoice_amount": "250000.5",
+        "automatic_subplans": ["Evento POS", "Otro Plan"],
+        "wave_size": 10,
+        "derechos_unavailable_percent": 40,
+        "derechos_min_sample": 5,
+        "cuv_token_failure_percent": 30,
+        "cuv_min_sample": 6
+    });
+    assert_eq!(json(&resp), expected);
+    assert_eq!(json(&h.get("/api/parameters")), expected);
+    let stored = h.state.ctx.parametros().get().expect("get").expect("row");
+    assert_eq!(stored.max_invoice_amount.to_string(), "250000.50");
+    assert_eq!(stored.automatic_subplans, ["Evento POS", "Otro Plan"]);
+}
+
+#[test]
+fn put_accepts_capitalized_keys_like_go_and_a_second_put_replaces() {
+    let h = Harness::new();
+    assert_eq!(
+        put_params(&h, &VALID.replace("wave_size", "Wave_Size")).status,
+        200
+    );
+    let again = VALID.replace("\"wave_size\":10", "\"wave_size\":0");
+    assert_eq!(put_params(&h, &again).status, 200);
+    assert_eq!(json(&h.get("/api/parameters"))["wave_size"], 0);
+}
+
+#[test]
+fn put_rejects_unknown_fields_trailing_json_and_bad_bodies_with_400() {
+    let h = Harness::new();
+    let unknown = VALID.replace("{\"max", "{\"extra\":1,\"max");
+    let trailing = format!("{VALID}{VALID}");
+    for body in [
+        unknown.as_str(),
+        trailing.as_str(),
+        "",
+        "[]",
+        "{nope",
+        r#"{"wave_size":"x"}"#,
+    ] {
+        let resp = put_params(&h, body);
+        assert_eq!(resp.status, 400, "{body}");
+        assert!(
+            error_of(&resp).starts_with("cuerpo invalido: "),
+            "{body}: {}",
+            error_of(&resp)
+        );
+    }
+    assert!(
+        h.state.ctx.parametros().get().expect("get").is_none(),
+        "nothing saved"
+    );
+}
+
+#[test]
+fn put_validates_with_the_spanish_messages_of_the_store() {
+    let h = Harness::new();
+    let cases = [
+        (
+            VALID.replace("250000.50", "1.234,5"),
+            "monto máximo inválido: use pesos sin separador de miles y máximo dos decimales, p. ej. 100000",
+        ),
+        (
+            VALID.replace("250000.50", "0"),
+            "el monto máximo debe ser positivo",
+        ),
+        (
+            VALID.replace("250000.50", ""),
+            "monto máximo inválido: use pesos sin separador de miles y máximo dos decimales, p. ej. 100000",
+        ),
+        (
+            VALID.replace("\"wave_size\":10", "\"wave_size\":501"),
+            "el tamaño de oleada debe estar entre 0 (desactivado) y 500",
+        ),
+        (
+            VALID.replace("\"wave_size\":10", "\"wave_size\":99999999999"),
+            "el tamaño de oleada debe estar entre 0 (desactivado) y 500",
+        ),
+        (
+            VALID.replace("\"cuv_min_sample\":6", "\"cuv_min_sample\":-1"),
+            "la muestra mínima de CUV debe estar entre 0 y 1000",
+        ),
+        (
+            VALID.replace("[\"Evento POS\",\"Otro Plan\"]", "[]"),
+            "se requiere al menos un subplan automático",
+        ),
+        (
+            VALID.replace("\"Otro Plan\"", "\"  \""),
+            "los subplanes automáticos no pueden estar en blanco",
+        ),
+        (
+            VALID.replace("\"Otro Plan\"", "\" evento  pos \""),
+            "subplan automático duplicado «evento  pos»",
+        ),
+        (
+            r#"{"max_invoice_amount":"100"}"#.to_owned(),
+            "se requiere al menos un subplan automático",
+        ),
+    ];
+    for (body, message) in cases {
+        let resp = put_params(&h, &body);
+        assert_eq!(resp.status, 400, "{body}");
+        assert_eq!(error_of(&resp), message, "{body}");
+    }
+    assert!(h.state.ctx.parametros().get().expect("get").is_none());
+}
+
+#[test]
+fn put_from_another_origin_saves_nothing() {
+    let h = Harness::new();
+    let resp = h.send(
+        Request::new("PUT", "/api/parameters")
+            .with_header("Origin", "https://evil.example")
+            .with_body(VALID),
+    );
+    assert_eq!(resp.status, 403);
+    assert!(h.state.ctx.parametros().get().expect("get").is_none());
+}
+
+#[test]
+fn put_over_the_json_limit_is_413() {
+    let h = Harness::new();
+    let big = format!(r#"{{"automatic_subplans":["{}"]}}"#, "x".repeat(70 << 10));
+    let resp = put_params(&h, &big);
+    assert_eq!(
+        (resp.status, error_of(&resp).as_str()),
+        (413, "cuerpo demasiado grande")
+    );
+}

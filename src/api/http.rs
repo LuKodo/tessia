@@ -57,7 +57,8 @@ pub enum Trailing {
 /// lower-cased before decoding: declare `T`'s fields in lower case (`cargue`,
 /// `max_invoice_amount`) and `Cargue` / `CARGUE` / `cargue` all match. Of two
 /// keys that collide once lower-cased the later one wins, as in Go. Nested
-/// objects are left untouched. Use `#[serde(deny_unknown_fields)]` on `T` to
+/// objects are left untouched. The body must be a JSON object (an array,
+/// scalar or `null` is refused, as Go refuses them for a struct). Use `#[serde(deny_unknown_fields)]` on `T` to
 /// reject unknown fields.
 pub fn parse_json<T: DeserializeOwned>(
     body: &[u8],
@@ -76,18 +77,15 @@ pub fn parse_json<T: DeserializeOwned>(
     if trailing == Trailing::Refuse && stream.next().is_some() {
         return Err(JsonError::Trailing);
     }
-    serde_json::from_value(lowercase_keys(first)).map_err(|err| JsonError::Invalid(err.to_string()))
-}
-
-fn lowercase_keys(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => serde_json::Value::Object(
-            map.into_iter()
-                .map(|(key, value)| (key.to_lowercase(), value))
-                .collect(),
-        ),
-        other => other,
-    }
+    let serde_json::Value::Object(map) = first else {
+        return Err(JsonError::Invalid("se esperaba un objeto JSON".to_owned()));
+    };
+    let lowered: serde_json::Map<String, serde_json::Value> = map
+        .into_iter()
+        .map(|(key, value)| (key.to_lowercase(), value))
+        .collect();
+    serde_json::from_value(serde_json::Value::Object(lowered))
+        .map_err(|err| JsonError::Invalid(err.to_string()))
 }
 
 /// The request body as `T`, trailing data ignored (Go `decodeJSONBody`):
@@ -171,6 +169,13 @@ mod tests {
         );
         let err = read_json::<Run>(&req(r#"{"limit":1}"#), MAX_JSON_BODY).expect_err("missing");
         assert_eq!(err.status, 400);
+        for body in ["[]", "null", "3", "\"x\""] {
+            let err = read_json::<Run>(&req(body), MAX_JSON_BODY).expect_err(body);
+            assert_eq!(
+                (err.status, err.message.as_str()),
+                (400, "cuerpo invalido: se esperaba un objeto JSON")
+            );
+        }
     }
 
     #[test]
