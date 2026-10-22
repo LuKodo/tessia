@@ -51,6 +51,7 @@
 //! # Ok(()) }
 //! ```
 
+pub mod dashboard;
 mod error;
 mod rows;
 mod schema;
