@@ -1,8 +1,12 @@
 //! `radicacion run` and `radicacion recheck-step2`: the Mutual Ser 4-step filing pipeline.
-//!
-//! Skeleton: the owner of this phase replaces the bodies below.
 
+pub mod api;
 pub mod cli;
+pub mod client;
+pub mod confirm;
+pub mod model;
+pub mod rules;
+pub mod timings;
 
 use anyhow::{Result, bail};
 
