@@ -140,9 +140,38 @@ pub fn run_with(ctx: &AppContext, req: &PhaseRequest, options: &RunOptions) -> R
     execute(ctx, &req.cargue_id, dataset, &only, options)
 }
 
-/// Reads the invoices (and the prepared-format flag) of the cargue.
-fn load_dataset(_ctx: &AppContext, _cargue_id: &str, _only: &[String]) -> Result<DatasetInput> {
-    bail!("la lectura del dataset del cargue aún no está conectada (fase B)")
+/// Reads the prepared invoices of the cargue (only the named ones with
+/// `--invoices`, so a per-invoice call does not read the whole load) and the
+/// prepared-format flag.
+pub fn load_dataset(ctx: &AppContext, cargue_id: &str, only: &[String]) -> Result<DatasetInput> {
+    let subset = (!only.is_empty()).then_some(only);
+    let Some(dataset) = ctx.dataset().read_current(cargue_id, subset)? else {
+        bail!("el cargue {cargue_id} no está preparado: ejecuta `convenio preparar` primero");
+    };
+    Ok(DatasetInput {
+        prepared_format: dataset.preparation.prepared_format,
+        invoices: dataset.invoices.iter().map(input_of).collect(),
+    })
+}
+
+/// The cells this phase reads from a stored invoice.
+fn input_of(invoice: &crate::domain::dataset::Invoice) -> InvoiceInput {
+    InvoiceInput {
+        invoice: invoice.invoice.clone(),
+        lines: invoice
+            .lines
+            .iter()
+            .map(|line| LineInput {
+                doc_type: line.doc_type.clone(),
+                doc_number: line.doc_number.clone(),
+                csv_gender: line.gender.clone(),
+                csv_birth_date: line.birth_date.clone(),
+                causal_exento: line.causal_exento.clone(),
+                departamento: line.department.clone(),
+                municipio: line.municipality.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// Selects, claims, validates and stores the rights of `dataset` (everything
