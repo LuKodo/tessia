@@ -1,0 +1,19 @@
+{
+  "ResultState": false,
+  "ProcesoId": 0,
+  "NumFactura": "FVS1000003",
+  "CodigoUnicoValidacion": null,
+  "CodigoUnicoValidacionToShow": null,
+  "FechaRadicacion": null,
+  "RutaArchivos": null,
+  "ResultadosValidacion": [
+    {
+      "Clase": "RECHAZADO",
+      "Codigo": "RVC033",
+      "Descripcion": "Campo",
+      "Observaciones": "obs",
+      "PathFuente": "usuarios[0]",
+      "Fuente": "Rips"
+    }
+  ]
+}

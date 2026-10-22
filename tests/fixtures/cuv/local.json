@@ -1,0 +1,61 @@
+{
+ "local": [
+  {
+   "name": "rvg18",
+   "input": "local/rvg18.txt",
+   "cuv": "1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1",
+   "output": "local/rvg18.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "sin_rvg18",
+   "input": "local/sin_rvg18.txt",
+   "cuv": null,
+   "output": "local/sin_rvg18.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "ruta_slash",
+   "input": "local/ruta_slash.txt",
+   "cuv": null,
+   "output": "local/ruta_slash.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "ruta_vacia",
+   "input": "local/ruta_vacia.txt",
+   "cuv": null,
+   "output": "local/ruta_vacia.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "rvg18_sin_obs",
+   "input": "local/rvg18_sin_obs.txt",
+   "cuv": null,
+   "output": "local/rvg18_sin_obs.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "rvg18_vacio",
+   "input": "local/rvg18_vacio.txt",
+   "cuv": "",
+   "output": "local/rvg18_vacio.out.txt",
+   "resultado": "escrito"
+  },
+  {
+   "name": "no_objeto",
+   "input": "local/no_objeto.txt",
+   "resultado": "no_json"
+  },
+  {
+   "name": "elemento_no_objeto",
+   "input": "local/elemento_no_objeto.txt",
+   "resultado": "error"
+  },
+  {
+   "name": "ruta_solo_separadores",
+   "input": "local/ruta_solo_separadores.txt",
+   "resultado": "error"
+  }
+ ]
+}

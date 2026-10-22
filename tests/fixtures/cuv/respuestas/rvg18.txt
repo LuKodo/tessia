@@ -1,0 +1,27 @@
+{
+  "ResultState": false,
+  "ProcesoId": 0,
+  "NumFactura": null,
+  "CodigoUnicoValidacion": null,
+  "CodigoUnicoValidacionToShow": null,
+  "FechaRadicacion": "0001-01-01T00:00:00",
+  "RutaArchivos": "C:\\Temp\\FVS1000002\\",
+  "ResultadosValidacion": [
+    {
+      "Clase": "RECHAZADO",
+      "Codigo": "RVG18",
+      "Descripcion": "El documento ya fue validado",
+      "Observaciones": " 0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbbbb0bbbb ",
+      "PathFuente": "",
+      "Fuente": "FacturaElectronica"
+    },
+    {
+      "Clase": "RECHAZADO",
+      "Codigo": "RVC051",
+      "Descripcion": "d",
+      "Observaciones": null,
+      "PathFuente": null,
+      "Fuente": null
+    }
+  ]
+}

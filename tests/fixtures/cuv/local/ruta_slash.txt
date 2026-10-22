@@ -1,0 +1,1 @@
+{"RutaArchivos":"/tmp/rips/FVS2000004","ResultState":"no"}

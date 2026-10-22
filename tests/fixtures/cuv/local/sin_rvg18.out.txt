@@ -1,0 +1,14 @@
+{
+  "ResultState": true,
+  "ProcesoId": 7,
+  "RutaArchivos": "\\\\srv\\rips\\FVS2000003 ",
+  "ResultadosValidacion": [
+    {
+      "Codigo": "RVC019",
+      "Observaciones": "x"
+    },
+    {}
+  ],
+  "Extra": 1.50,
+  "NumFactura": "FVS2000003 "
+}
