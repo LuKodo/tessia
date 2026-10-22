@@ -29,8 +29,8 @@ fn nt_row(code: &str, cum: &str, product_type: &str, price: &str) -> NtRow {
         tipo_producto: Some(product_type.into()),
         precio_contrato: Some(price.parse().expect("price")),
         ffm_rips: Some("TABLETA".into()),
-        umm_rips: Some("MG".into()),
-        upr_rips: Some("500".into()),
+        umm_rips: Some("500".into()),
+        upr_rips: Some("MG".into()),
         ..NtRow::default()
     }
 }

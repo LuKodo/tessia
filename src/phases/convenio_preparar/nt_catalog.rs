@@ -11,24 +11,30 @@
 //! | product type 714/799 | `tipo_producto` (else `clasificacion` when that is exactly 714/799); an empty value keeps Go's default rule (dash in the CUM or more than 14 characters = 714, else 799) |
 //! | agreed price | `precio_contrato`, else `precio_final` (Go: the first column whose header holds PRECIO CONTRATO or PRECIO FINAL); `precio_maximo` is a ceiling, not the agreed price, and is ignored. No price = `0`, which skips the price rule |
 //! | pharmaceutical form | `ffm_rips` |
-//! | concentration | `upr_rips` (see the open question below) |
-//! | measure unit | `umm_rips` |
+//! | concentration | `umm_rips` (confirmed against real data, see below) |
+//! | measure unit | `upr_rips` |
 //!
-//! **Open question (needs a real NT row to confirm):** the three RIPS fields
-//! are `ffm_rips`, `umm_rips` and `upr_rips`; Go has form, concentration and
-//! unit. `ffm` (forma farmacéutica) and `umm` (unidad de medida) are
-//! unambiguous, so concentration takes `upr_rips`. A row may override it with
-//! an explicit extra key (`concentracion`, `concentracion_rips`,
-//! `concentracion_medicamento_rips`).
+//! **Confirmed against real data (2026-10-22).** Comparing the distinct code
+//! sets of the real workbook (`Hoja1`) with the real Redis rows: all 46
+//! values of the workbook's `CONCENTRACION MEDICAMENTO RIPS` column appear in
+//! `umm_rips`, and all 25 values of `UNIDAD MEDIDA RIPS` appear in
+//! `upr_rips` (and `ffm_rips` carries the 36 form codes). So, despite its
+//! name, `umm_rips` is the concentration code and `upr_rips` the unit. A row
+//! may still override the concentration with an explicit extra key
+//! (`concentracion`, `concentracion_rips`, `concentracion_medicamento_rips`).
 //!
 //! **Several rows per key.** The catalog key is `normCode(cod_gen_siesa) |
 //! normCode(cum_facturar)`. Go's rule "the last duplicate wins" is kept
 //! because later rows of a source sheet are corrections: the rows returned by
 //! `NtCatalog::lookup` (ordered by id, `<id>#N` variants included) are
 //! inserted in that order, so the last eligible one stays. A row is
-//! **eligible** only when its `estado` is empty or `VALIDADO` (accent/case
-//! insensitive); rows in any other state never authorize billing, so a line
-//! that only matches ineligible rows reads as "No cruza nota tecnica".
+//! **eligible** unless its `estado` is `ERROR` (accent/case insensitive). The
+//! real NT has three states: `VALIDADO`, `CON ALERTA` (valid with warnings,
+//! e.g. the CUM is not linked; these rows carry the agreed price and crossed
+//! in the Go workbook) and `ERROR` (513 rows). `ERROR` rows never authorize
+//! billing, so a line that only matches them reads as "No cruza nota
+//! tecnica". This is an inference from the data, not a stated rule; it is
+//! the single place to change ([`is_eligible`]).
 //! Rows without CUM or generic code are skipped (as Go skips them).
 //!
 //! **Lookup.** Only `cum_facturar` is indexed in Redis, so the catalog is
@@ -47,8 +53,8 @@ use crate::nt::{NtCatalog, NtRow};
 use crate::util::par;
 use crate::util::text::normalize_key;
 
-/// Only rows in this state authorize billing (empty counts as valid).
-const VALID_ESTADO: &str = "VALIDADO";
+/// Rows in this state never authorize billing.
+const INVALID_ESTADO: &str = "ERROR";
 
 /// Concurrent Redis lookups while building the catalog.
 const LOOKUP_WORKERS: usize = 8;
@@ -75,7 +81,7 @@ pub fn resolve_version(nt: &dyn NtCatalog, pinned: Option<&str>) -> Result<Strin
 pub fn is_eligible(row: &NtRow) -> bool {
     match row.estado.as_deref().map(normalize_key) {
         None => true,
-        Some(estado) => estado.is_empty() || estado == VALID_ESTADO,
+        Some(estado) => estado != INVALID_ESTADO,
     }
 }
 
@@ -96,7 +102,7 @@ pub fn item_from_row(row: &NtRow) -> Option<Item> {
             .map_or_else(|| "0".to_owned(), price_text),
         form: text_of(row.ffm_rips.as_deref()),
         concentration: concentration_of(row),
-        unit: text_of(row.umm_rips.as_deref()),
+        unit: text_of(row.upr_rips.as_deref()),
     })
 }
 
@@ -124,7 +130,7 @@ fn concentration_of(row: &NtRow) -> String {
             return value;
         }
     }
-    text_of(row.upr_rips.as_deref())
+    text_of(row.umm_rips.as_deref())
 }
 
 /// Adds the eligible rows to the catalog in the given order (last wins).
@@ -186,8 +192,8 @@ mod tests {
         r.precio_final = Some("9".parse().expect("dec"));
         r.precio_maximo = Some("99999".parse().expect("dec"));
         r.ffm_rips = Some("TABLETA".into());
-        r.upr_rips = Some("500".into());
-        r.umm_rips = Some("MG".into());
+        r.umm_rips = Some("500".into());
+        r.upr_rips = Some("MG".into());
         let item = item_from_row(&r).expect("item");
         assert_eq!(item.cum, "19950404-1");
         assert_eq!(item.generic_code, "20010");
@@ -244,7 +250,7 @@ mod tests {
     #[test]
     fn concentration_prefers_an_explicit_key() {
         let mut r = row("1", "A");
-        r.upr_rips = Some("UPR".into());
+        r.umm_rips = Some("UPR".into());
         assert_eq!(item_from_row(&r).expect("item").concentration, "UPR");
         r.extra
             .insert("concentracion".into(), serde_json::json!(250));
@@ -259,12 +265,14 @@ mod tests {
     }
 
     #[test]
-    fn only_validated_or_unmarked_rows_are_eligible() {
+    fn every_row_but_error_ones_is_eligible() {
         let mut r = row("1", "A");
         assert!(is_eligible(&r));
         r.estado = Some(" validado ".into());
         assert!(is_eligible(&r));
-        r.estado = Some("HISTÓRICO".into());
+        r.estado = Some("CON ALERTA".into());
+        assert!(is_eligible(&r));
+        r.estado = Some(" error ".into());
         assert!(!is_eligible(&r));
         r.estado = Some(String::new());
         assert!(is_eligible(&r));
@@ -278,7 +286,7 @@ mod tests {
         second.precio_final = Some("2".parse().expect("dec"));
         let mut stale = row("9", "55");
         stale.precio_final = Some("3".parse().expect("dec"));
-        stale.estado = Some("HISTORICO".into());
+        stale.estado = Some("ERROR".into());
         let mut catalog = Catalog::new("v");
         add_rows(&mut catalog, &[first, second, stale]);
         assert_eq!(catalog.len(), 1);
