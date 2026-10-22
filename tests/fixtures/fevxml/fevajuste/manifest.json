@@ -1,0 +1,142 @@
+{
+ "cucon_valor": "CUCON-SINT&<9>",
+ "xml": [
+  {
+   "name": "contrato_22382",
+   "input": "xml/contrato_22382.input.xml",
+   "cucon_resultado": "modificado",
+   "cucon": "xml/contrato_22382.cucon.xml",
+   "cuota_modificado": true,
+   "cuota_salida": "ADVERTENCIA <ARCHIVO>: no se encontro cbc:PrepaidAmount para anticipos por 3500.00\n",
+   "cuota": "xml/contrato_22382.cuota.xml"
+  },
+  {
+   "name": "contrato_otro",
+   "input": "xml/contrato_otro.input.xml",
+   "cucon_resultado": "contrato_diferente",
+   "cucon": "xml/contrato_otro.cucon.xml",
+   "cuota_modificado": false,
+   "cuota_salida": "",
+   "cuota": "xml/contrato_otro.cuota.xml"
+  },
+  {
+   "name": "sin_contrato",
+   "input": "xml/sin_contrato.input.xml",
+   "cucon_resultado": "sin_contrato",
+   "cucon": "xml/sin_contrato.cucon.xml",
+   "cuota_modificado": false,
+   "cuota_salida": "",
+   "cuota": "xml/sin_contrato.cuota.xml"
+  },
+  {
+   "name": "anticipo",
+   "input": "xml/anticipo.input.xml",
+   "cucon_resultado": "modificado",
+   "cucon": "xml/anticipo.cucon.xml",
+   "cuota_modificado": true,
+   "cuota_salida": "ADVERTENCIA <ARCHIVO>: PrepaidAmount=3000.0 no coincide con suma PaidAmount=3000.5\n",
+   "cuota": "xml/anticipo.cuota.xml"
+  },
+  {
+   "name": "prepaid_cuadra",
+   "input": "xml/prepaid_cuadra.input.xml",
+   "cucon_resultado": "contrato_diferente",
+   "cucon": "xml/prepaid_cuadra.cucon.xml",
+   "cuota_modificado": true,
+   "cuota_salida": "",
+   "cuota": "xml/prepaid_cuadra.cuota.xml"
+  }
+ ],
+ "total": [
+  {
+   "name": "payable",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:LegalMonetaryTotal>\n    <cbc:PayableAmount currencyID=\"COP\"> 6500.00 </cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": "6500.00"
+  },
+  {
+   "name": "tax_primero",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n                <AdditionalInformation>\n                  <Name>NUMERO_CONTRATO</Name>\n                  <Value>22382</Value>\n                </AdditionalInformation>\n                <AdditionalInformation>\n                  <Name>ANTICIPOS</Name>\n                  <Value schemeID=\"01\"> 5000 </Value>\n                </AdditionalInformation>\n                <AdditionalInformation>\n                  <Name>CUOTA_MODERADORA</Name>\n                  <Value>0</Value>\n                </AdditionalInformation>\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:PrepaidPayment>\n    <cbc:ID schemeID=\"99\"\n      schemeName=\"old\">A1</cbc:ID>\n    <cbc:PaidAmount currencyID=\"COP\">2000</cbc:PaidAmount>\n    <cbc:InstructionID> Anticipo </cbc:InstructionID>\n  </cac:PrepaidPayment>\n  <cac:PrepaidPayment>\n    <cbc:ID></cbc:ID>\n    <cbc:PaidAmount currencyID=\"COP\">1000.5</cbc:PaidAmount>\n    <cbc:InstructionID>PAGO_COMPARTIDO</cbc:InstructionID>\n  </cac:PrepaidPayment>\n  <cac:PrepaidPayment>\n    <cbc:ID>3</cbc:ID>\n    <cbc:PaidAmount currencyID=\"COP\">x</cbc:PaidAmount>\n  </cac:PrepaidPayment>\n  <cac:LegalMonetaryTotal>\n    <cbc:PrepaidAmount currencyID=\"COP\">3000.0</cbc:PrepaidAmount>\n    <cbc:TaxInclusiveAmount currencyID=\"COP\">1,234.50</cbc:TaxInclusiveAmount>\n    <cbc:PayableAmount currencyID=\"COP\">999</cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": "1234.50"
+  },
+  {
+   "name": "coma_decimal",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n                <AdditionalInformation>\n                  <Name>NUMERO_CONTRATO</Name>\n                  <Value>otro</Value>\n                </AdditionalInformation>\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:PrepaidPayment>\n    <cbc:ID>9</cbc:ID>\n    <cbc:PaidAmount>3500</cbc:PaidAmount>\n    <cbc:InstructionID>COPAGO</cbc:InstructionID>\n  </cac:PrepaidPayment>\n  <cac:LegalMonetaryTotal>\n    <cbc:PrepaidAmount>3500.00</cbc:PrepaidAmount>\n    <cbc:PayableAmount>12500,5</cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": "12500.5"
+  },
+  {
+   "name": "miles_y_decimal",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:LegalMonetaryTotal>\n    <cbc:PayableAmount>1.234,5</cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": "1.2345"
+  },
+  {
+   "name": "dos_puntos",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:LegalMonetaryTotal>\n    <cbc:PayableAmount>1.234.5</cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": null
+  },
+  {
+   "name": "sin_total",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n                <AdditionalInformation>\n                  <Name>COPAGO</Name>\n                  <Value>0</Value>\n                </AdditionalInformation>\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": null
+  },
+  {
+   "name": "sin_cdata",
+   "xml": "<Invoice><cac:LegalMonetaryTotal><cbc:PayableAmount>77</cbc:PayableAmount></cac:LegalMonetaryTotal></Invoice>",
+   "total": "77"
+  },
+  {
+   "name": "punto_final",
+   "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n<AttachedDocument xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:AttachedDocument-2\" xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\" xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:ID>FVS2000001</cbc:ID>\n  <cac:Attachment>\n    <cac:ExternalReference>\n      <cbc:MimeCode>text/xml</cbc:MimeCode>\n      <cbc:Description><![CDATA[<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Invoice xmlns=\"urn:oasis:names:specification:ubl:schema:xsd:Invoice-2\">\n  <ext:UBLExtensions>\n    <ext:UBLExtension>\n      <ext:ExtensionContent>\n        <CustomTagGeneral>\n          <Interoperabilidad>\n            <Group schemeName=\"Sector Salud\">\n              <Collection schemeName=\"Usuario\">\n              </Collection>\n            </Group>\n          </Interoperabilidad>\n        </CustomTagGeneral>\n      </ext:ExtensionContent>\n    </ext:UBLExtension>\n  </ext:UBLExtensions>\n  <cac:LegalMonetaryTotal><cbc:PayableAmount>5.</cbc:PayableAmount></cac:LegalMonetaryTotal>\n  <cbc:Note>Ñandú &amp; ç</cbc:Note>\n</Invoice>]]></cbc:Description>\n    </cac:ExternalReference>\n  </cac:Attachment>\n</AttachedDocument>\n",
+   "total": "5"
+  }
+ ],
+ "numero_convenio": [
+  {
+   "input": "12500",
+   "value": "12500"
+  },
+  {
+   "input": " $ 12.500,50 ",
+   "value": "12500.50"
+  },
+  {
+   "input": "3500,5",
+   "value": "3500.5"
+  },
+  {
+   "input": "1.5",
+   "value": "1.5"
+  },
+  {
+   "input": "0",
+   "value": "0"
+  },
+  {
+   "input": "",
+   "value": null
+  },
+  {
+   "input": "  ",
+   "value": null
+  },
+  {
+   "input": "abc",
+   "value": null
+  },
+  {
+   "input": "1.234.567",
+   "value": null
+  },
+  {
+   "input": "-20",
+   "value": "-20"
+  },
+  {
+   "input": "1e3",
+   "value": "1000"
+  },
+  {
+   "input": "007.10",
+   "value": "7.10"
+  }
+ ]
+}
