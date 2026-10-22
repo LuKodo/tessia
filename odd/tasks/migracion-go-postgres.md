@@ -5,13 +5,14 @@ Test runner: `cargo test` (hermetic: mock HTTP servers, Postgres container `tess
 
 ## Specs
 - S1 (dry-run): "no vamos a poner modo dry-run, vamos directo a lo que es!" -> no dry-run, no `--live`, no `SI` confirmation anywhere.
-- S2 (scope): "convenio descargar, convenio preparar, proceso run, conciliar, thefactory, derechos, fev, rips, cuv, soporte y radicacion." Sub-commands of those groups are in scope (`fev ajustar|verificar`, `cuv generar|barrer`, `radicacion run|recheck-step2`). Out of scope: `serve` (HTTP), `siesa`, `migrate`, `seguimiento`, `convenio importar`, `desktop`.
+- S2 (scope): "convenio descargar, convenio preparar, proceso run, conciliar, thefactory, derechos, fev, rips, cuv, soporte y radicacion." Sub-commands of those groups are in scope (`fev ajustar|verificar`, `cuv generar|barrer`, `radicacion run|recheck-step2`). Out of scope: `siesa`, `migrate`, `seguimiento`, `convenio importar`. (`serve`/`desktop` were out of scope until S10, which brings the dashboard + desktop window in.)
 - S3 (multi machine): "esto deberia correr en n numero de maquinas, porque la idea es tener un cron corriendo automaticamente cada dia, haciendo el proceso completo del dia anterior. pero tambien hay que tener uno o dos pcs ejecutando el proceso "manual" y no deberian chocarse." -> cross-host coordination through Postgres (claims/leases), no `.lock` files; a "previous day" full-process entry point (`facturacion diario`) is a NEW behavior (Wave 3).
 - S4 (database): "no pensemos en mysql sino en postgres. llevemos lo que ya habiamos pactado, pero usando postgres, bien ordenadito todo" -> Postgres via Diesel + embedded migrations; sync Rust (threads + blocking reqwest).
 - S5 (files): "meterlos en la base de datos me parece mala idea ... creo que usando un oci bucket se podria ... cassandra, que permite subir, listar, descargar archivos de un bucket" and "en el bucket usa nombres planos, en la carpeta temporal, por necesidad puedes usar los _ y los prefijos." -> bucket key = `<cargue_id>__<relative path with "/" replaced by "__">`; Postgres `artefactos` index (never parse keys); per-machine temp workdir recreates the Go folder layout and is deleted after use.
 - S6 (NT): "ya no necesitamos ni cargar ni copiar la nota tecnica, ahora debemos conectarnos a una coleccion de redis que estara siempre disponible con toda la informacion lista" -> read-only Redis client. Observed layout (read-only scan of local `nt-redis-test`): `nt:actual` (string = current version), `nt:versiones` (zset), `nt:<ver>:meta` (hash), `nt:<ver>:filas` (hash: field=`<id>` or `<id>#N`, value=JSON row with cum_facturar, cod_auf, cod_mutual, cod_gen_siesa, tipo_producto, ffm_rips, umm_rips, upr_rips, precio_contrato, precio_final, precio_maximo, subplan, contrato, clasificacion, estado, ...), `nt:<ver>:idx:<campo>:<valor>` (sets of ids; fields cod_auf, cod_mutual, cum_facturar, contrato, estado). The earlier xlsx/SQLite NT code is removed.
 - S7 (fidelity): "migre, de la manera mas sencilla posible, el comportamiento de go a rust, todo el comportamiento!" -> faithful port of the Go behavior of the S2 commands (rules, states, reason strings, file names, formats), simplest implementation; deviations only those forced by S1/S3-S6 and recorded in the Log.
 - S8 (assumption, not user-stated): cargue id = Go semantics (CSV stem, e.g. `Convenio_21102026_21102026`, `Manual_<ts>_<hash12>`), unique with CSV sha256, instead of the earlier timestamp+uuid id, because a re-run on any machine must resume the same cargue.
+- S10 (visual part, 2026-10-22): "ahora falta una parte visual que emule lo que go hace en es ritorio" -> a desktop window that reproduces the Go desktop app (Wails window embedding the existing Lit/TS dashboard `../ui` with the API running in-process). Working assumptions (not user-stated, recorded for review): reuse the existing UI instead of writing a new one; Rust shell with `wry`+`tao` serving the embedded UI and the API through a custom protocol (no TCP listener, like Wails); the API contract is Go's `docs/openapi.yaml`; the nota-tecnica upload route is replaced by a read-only Redis status; jobs run in-process, one at a time per machine.
 - S9 (language): code/comments/tests/commit messages in English; user-facing messages, states and reasons in Spanish exactly as Go (they are a stored contract).
 
 ## Tasks
@@ -31,6 +32,11 @@ Wave 2 (parallel, one worktree each; start after T1+T2 merged)
 - T10 soporte generar (+PDF rendering)
 - T11 conciliar (+Medicar formula client)
 - T12 radicacion run/recheck-step2 (+Mutual Ser client, pipeline)
+Wave 4 (S10, visual part)
+- T15 explore UI + Go API contract (read-only) -> `odd/reference/ui-api-spec.md`
+- T16 backend `api` module (routes + Postgres read models + in-process job runner)
+- T17 desktop shell (wry/tao window, embedded UI build, custom protocol bridge)
+- T18 UI adaptation (copy of `ui/` adjusted for the Rust backend, e.g. nota-tecnica panel)
 Wave 3 (parent/writer, after Wave 2 merged)
 - T13 proceso run (orchestrator, workers, replacement, radicacion batching) + `diario` (previous-day cron entry) + config check
 - T14 integration pass: full `cargo test`, clippy, docs/help texts, README
@@ -52,3 +58,5 @@ Wave 3 (parent/writer, after Wave 2 merged)
 - Infra: test Postgres `tessia-pg-test` (127.0.0.1:55432, max_connections 800), test Redis `tessia-redis-test` (127.0.0.1:56379), shared cargo target `~/.cache/tessia-target`.
 - Open follow-ups for Wave 3: unify Medicar login (descargar vs conciliar), unify NT->catalog mapping (preparar vs conciliar), `proceso run`, `diario`, `config check` review, help texts/README, remove `#![allow(dead_code)]` in fevxml.
 - [x] T1b dataset store (2026-10-22): `domain::dataset` (Dataset/Preparation/Invoice/Line + test builders), `stores::dataset::DatasetStore` (replace/merge, subset reads, optimistic `update_invoices`, current-cargue pointer, `agreement_total`, `preparation`/`save_preparation`), migration `2026-10-23-000000_dataset_tables`, `ctx.dataset()`, docs/architecture.md "Dataset store"; 24 tests in `tests/dataset_store.rs`.
+
+- 2026-10-22 L5 (user, verbatim): "ahora falta una parte visual que emule lo que go hace en es ritorio". Wave 4 opened. Wave 2 merged (all phases but proceso); real-data fixes by parent: NT concentration<-umm_rips, unit<-upr_rips, estado ERROR only ineligible. Radicacion merged; proceso writer (T13) still running.
