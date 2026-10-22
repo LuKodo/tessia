@@ -151,16 +151,16 @@ pub fn normalize_fecha_xml(v: &str) -> String {
         return String::new();
     };
     for sep in ['/', '-'] {
-        if let Some([d, m, y]) = date_parts(first, sep, 1..=2, 2..=2, 4..=4) {
-            if let Some(iso) = smart_date(y, m, d) {
-                return iso;
-            }
-        }
-    }
-    if let Some([y, m, d]) = date_parts(first, '/', 4..=4, 2..=2, 2..=2) {
-        if let Some(iso) = smart_date(y, m, d) {
+        if let Some([d, m, y]) = date_parts(first, sep, 1..=2, 2..=2, 4..=4)
+            && let Some(iso) = smart_date(y, m, d)
+        {
             return iso;
         }
+    }
+    if let Some([y, m, d]) = date_parts(first, '/', 4..=4, 2..=2, 2..=2)
+        && let Some(iso) = smart_date(y, m, d)
+    {
+        return iso;
     }
     String::new()
 }
@@ -200,7 +200,9 @@ fn smart_date(y: &str, m: &str, d: &str) -> Option<String> {
 fn month_length(year: u32, month: u32) -> u32 {
     match month {
         4 | 6 | 9 | 11 => 30,
-        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
         2 => 28,
         _ => 31,
     }
@@ -229,10 +231,10 @@ pub fn extract_hour_minute(texto: &str) -> String {
 
 /// `dd/MM/yyyy` becomes ISO; anything else is kept as given.
 pub fn birth_date_iso(v: &str) -> String {
-    if let Some([d, m, y]) = date_parts(v, '/', 2..=2, 2..=2, 4..=4) {
-        if let Some(iso) = smart_date(y, m, d) {
-            return iso;
-        }
+    if let Some([d, m, y]) = date_parts(v, '/', 2..=2, 2..=2, 4..=4)
+        && let Some(iso) = smart_date(y, m, d)
+    {
+        return iso;
     }
     v.to_owned()
 }
