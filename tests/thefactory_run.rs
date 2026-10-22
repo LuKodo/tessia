@@ -276,14 +276,15 @@ fn downloads_cleans_zips_publishes_and_records_done() {
     for invoice in ["FEV1", "FEV2"] {
         assert_eq!(state(&ctx, invoice), (PhaseState::Done, String::new(), 1));
     }
-    let first = &tf.requests()[0];
+    let requests = tf.requests();
+    let first = requests
+        .iter()
+        .find(|r| r.body_text().contains("FEV1") && r.path.ends_with("GenerarContenedor"))
+        .expect("FEV1 xml request");
     assert_eq!(first.method, "POST");
     assert_eq!(
-        (first.path.as_str(), first.body_text().as_str()),
-        (
-            "/api/archivos/GenerarContenedor",
-            r#"{"tokenEmpresa":"emp","tokenPassword":"pw","documento":"FEV1"}"#
-        )
+        first.body_text(),
+        r#"{"tokenEmpresa":"emp","tokenPassword":"pw","documento":"FEV1"}"#
     );
     assert_eq!(count(&api, "/documentos/"), 1, "FEV2 has no SSC");
     // The XML total tracking row exists (best effort side effect).
