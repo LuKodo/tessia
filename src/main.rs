@@ -1,6 +1,7 @@
 mod cli;
 mod config;
 mod db;
+mod fevxml;
 mod importers;
 mod load;
 mod models;
