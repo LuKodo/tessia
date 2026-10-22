@@ -15,7 +15,7 @@ path = "src/main.rs"
 [features]
 # Exposes `db::test_support` (random throwaway databases) to integration tests
 # and to other crates; unit tests always have it.
-test-support = []
+test-support = ["dep:tiny_http"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -40,6 +40,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 thiserror = "2.0.21"
+tiny_http = { version = "0.12", optional = true }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2"
