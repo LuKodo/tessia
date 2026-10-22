@@ -32,7 +32,13 @@ impl Values {
     }
 
     /// Stores the XML total read from the ZIP (replaces amount, source and path).
-    pub fn sync_xml_total(&self, invoice: &str, amount: &str, source: &str, zip: &str) -> Result<()> {
+    pub fn sync_xml_total(
+        &self,
+        invoice: &str,
+        amount: &str,
+        source: &str,
+        zip: &str,
+    ) -> Result<()> {
         let amount = parse_plain(amount.trim())?;
         Ok(self.xml.sync_xml_total(invoice, amount, source, zip)?)
     }

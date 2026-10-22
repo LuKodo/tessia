@@ -197,9 +197,13 @@ pub fn txt_cuv(content: &[u8]) -> Option<String> {
 }
 
 fn is_cuv_key(key: &str) -> bool {
-    ["CodigoUnicoValidacion", "CodigoUnicoValidacionToShow", "CUV"]
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case(key))
+    [
+        "CodigoUnicoValidacion",
+        "CodigoUnicoValidacionToShow",
+        "CUV",
+    ]
+    .iter()
+    .any(|name| name.eq_ignore_ascii_case(key))
 }
 
 fn find_cuv(value: &Value) -> Option<String> {
@@ -324,16 +328,36 @@ mod tests {
     #[test]
     fn retryable_messages_are_per_step() {
         let cases = [
-            (Step::InvoiceZip, "404 Not Found No such object: rdfs_prod/facturacion_electronica/x", true),
+            (
+                Step::InvoiceZip,
+                "404 Not Found No such object: rdfs_prod/facturacion_electronica/x",
+                true,
+            ),
             (Step::InvoiceZip, "Connection timed out", true),
-            (Step::InvoiceZip, "La estructura del XML no cumple con el estándar normativo", true),
+            (
+                Step::InvoiceZip,
+                "La estructura del XML no cumple con el estándar normativo",
+                true,
+            ),
             (Step::InvoiceZip, "factura duplicada", false),
-            (Step::Cuv, "En este momento no es posible verificar el CUV", true),
+            (
+                Step::Cuv,
+                "En este momento no es posible verificar el CUV",
+                true,
+            ),
             (Step::Cuv, "ERROR → Firebase error HTTP=500", true),
-            (Step::Cuv, "El CUV no cumple con el conjunto de información validada por el ministerio", true),
+            (
+                Step::Cuv,
+                "El CUV no cumple con el conjunto de información validada por el ministerio",
+                true,
+            ),
             (Step::Rips, "Señor usuario, para continuar debe...", true),
             (Step::Rips, "Connection timed out", false),
-            (Step::Crc, "El soporte que desea cargar no tiene factura/cuv cargada", true),
+            (
+                Step::Crc,
+                "El soporte que desea cargar no tiene factura/cuv cargada",
+                true,
+            ),
             (Step::Crc, "Error inesperado", true),
             (Step::Crc, "todo bien", false),
         ];
@@ -453,20 +477,38 @@ mod tests {
             "El CUV no cumple con el conjunto de información validada por el Ministerio"
         ));
         assert!(!cuv_not_ministry_compliant("ok"));
-        assert!(support_already_associated("Ya cuenta con un soporte asociado"));
+        assert!(support_already_associated(
+            "Ya cuenta con un soporte asociado"
+        ));
     }
 
     #[test]
     fn txt_cuv_detection() {
         for (name, input, want) in [
-            ("top-level key", r#"{"CodigoUnicoValidacion":"abc123"}"#, true),
-            ("nested case-insensitive", r#"{"ResultState":{"resultados":[{"cuv":"x1"}]}}"#, true),
-            ("to-show key", r#"{"codigounicovalidaciontoshow":"x"}"#, true),
+            (
+                "top-level key",
+                r#"{"CodigoUnicoValidacion":"abc123"}"#,
+                true,
+            ),
+            (
+                "nested case-insensitive",
+                r#"{"ResultState":{"resultados":[{"cuv":"x1"}]}}"#,
+                true,
+            ),
+            (
+                "to-show key",
+                r#"{"codigounicovalidaciontoshow":"x"}"#,
+                true,
+            ),
             ("dash", r#"{"CUV":"-"}"#, false),
             ("null literal", r#"{"CUV":null}"#, false),
             ("NULL string", r#"{"CUV":"null"}"#, false),
             ("no aplica", r#"{"CUV":"No aplica"}"#, false),
-            ("text says exists", r#"{"mensaje":"El CUV ya se encuentra registrado"}"#, true),
+            (
+                "text says exists",
+                r#"{"mensaje":"El CUV ya se encuentra registrado"}"#,
+                true,
+            ),
             ("text validado", r#"{"m":"CUV VALIDADO"}"#, true),
             ("not json", "CUV ya existe", false),
             ("empty", "", false),
@@ -478,7 +520,10 @@ mod tests {
             Some("abc123")
         );
         assert_eq!(txt_cuv(br#"{"CUV":"-"}"#), None);
-        assert_eq!(txt_cuv(br#"{"mensaje":"El CUV ya se encuentra registrado"}"#), None);
+        assert_eq!(
+            txt_cuv(br#"{"mensaje":"El CUV ya se encuentra registrado"}"#),
+            None
+        );
         assert_eq!(txt_cuv(b"not json"), None);
     }
 
@@ -489,12 +534,30 @@ mod tests {
         };
         assert_eq!(code("1000.00", true, "1000", true), None);
         assert_eq!(code("1000.004", true, "1000", true), None);
-        assert_eq!(code("1000.01", true, "1000", true), Some(CODE_VALUE_DIFFERENT));
-        assert_eq!(code("999.99", true, "1000", true), Some(CODE_VALUE_DIFFERENT));
-        assert_eq!(code("", false, "1000", true), Some(CODE_INVOICE_VALUE_UNAVAILABLE));
-        assert_eq!(code("1000", true, "", false), Some(CODE_AGREEMENT_VALUE_UNAVAILABLE));
-        assert_eq!(code("abc", true, "1000", true), Some(CODE_VALIDATION_UNAVAILABLE));
-        assert_eq!(code("1000", true, "abc", true), Some(CODE_VALIDATION_UNAVAILABLE));
+        assert_eq!(
+            code("1000.01", true, "1000", true),
+            Some(CODE_VALUE_DIFFERENT)
+        );
+        assert_eq!(
+            code("999.99", true, "1000", true),
+            Some(CODE_VALUE_DIFFERENT)
+        );
+        assert_eq!(
+            code("", false, "1000", true),
+            Some(CODE_INVOICE_VALUE_UNAVAILABLE)
+        );
+        assert_eq!(
+            code("1000", true, "", false),
+            Some(CODE_AGREEMENT_VALUE_UNAVAILABLE)
+        );
+        assert_eq!(
+            code("abc", true, "1000", true),
+            Some(CODE_VALIDATION_UNAVAILABLE)
+        );
+        assert_eq!(
+            code("1000", true, "abc", true),
+            Some(CODE_VALIDATION_UNAVAILABLE)
+        );
     }
 
     #[test]
@@ -510,7 +573,10 @@ mod tests {
             "No existe valor total del informe de convenio para comparar. valor_xml=700"
         );
         let (_, detail) = check_value("", false, "", false).unwrap();
-        assert_eq!(detail, "No se pudo extraer ni consultar el total XML antes de radicar.");
+        assert_eq!(
+            detail,
+            "No se pudo extraer ni consultar el total XML antes de radicar."
+        );
         let (_, detail) = check_value("abc", true, "1", true).unwrap();
         assert_eq!(
             detail,

@@ -10,7 +10,7 @@ use std::time::Duration;
 use rust_decimal::Decimal;
 
 use super::api::{ApiError, ApiResult, RadApi};
-use super::engine::{Config, Deps, Engine, Report, Wait};
+use super::engine::{Config, Deps, Engine, Report, UploadedHook, Wait};
 use super::files::{Files, Found};
 use super::model::{
     FileDetail, FiltersAllItem, Load, LoadFile, Message, SupportDocument, UploadFile, XmlDocument,
@@ -89,20 +89,24 @@ impl Portal {
                 })
             }),
             filters: Box::new(|portal, invoice| {
-                portal.uploaded(Step::Rips, invoice).then(|| FiltersAllItem {
-                    invoice_number: invoice.into(),
-                    status: "VALIDADO".into(),
-                    file_id: format!("f-{invoice}"),
-                    services_valid: true,
-                    services: "[1]".into(),
-                    is_support_document: portal.uploaded(Step::Crc, invoice),
-                    support: portal.uploaded(Step::Crc, invoice).then(|| SupportDocument {
-                        status: "ACTIVE".into(),
-                        raw: r#"{"estado":"ACTIVE"}"#.into(),
-                        ..SupportDocument::default()
-                    }),
-                    ..FiltersAllItem::default()
-                })
+                portal
+                    .uploaded(Step::Rips, invoice)
+                    .then(|| FiltersAllItem {
+                        invoice_number: invoice.into(),
+                        status: "VALIDADO".into(),
+                        file_id: format!("f-{invoice}"),
+                        services_valid: true,
+                        services: "[1]".into(),
+                        is_support_document: portal.uploaded(Step::Crc, invoice),
+                        support: portal
+                            .uploaded(Step::Crc, invoice)
+                            .then(|| SupportDocument {
+                                status: "ACTIVE".into(),
+                                raw: r#"{"estado":"ACTIVE"}"#.into(),
+                                ..SupportDocument::default()
+                            }),
+                        ..FiltersAllItem::default()
+                    })
             }),
             filters_calls: AtomicUsize::new(0),
             filters_delay: Duration::ZERO,
@@ -149,7 +153,11 @@ impl RadApi for Portal {
         Ok(id)
     }
 
-    fn find_load(&self, id: &str, _since: Option<chrono::DateTime<chrono::Utc>>) -> ApiResult<Load> {
+    fn find_load(
+        &self,
+        id: &str,
+        _since: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> ApiResult<Load> {
         self.load_calls.fetch_add(1, Ordering::SeqCst);
         let upload = self.uploads.lock().expect("uploads").get(id).cloned();
         match upload {
@@ -194,10 +202,11 @@ impl Files for FakeFiles {
     }
 
     fn find(&self, step: Step, invoice: &str, include_archived: bool) -> anyhow::Result<Found> {
-        self.finds
-            .lock()
-            .expect("finds")
-            .push((step.as_i16(), invoice.to_owned(), include_archived));
+        self.finds.lock().expect("finds").push((
+            step.as_i16(),
+            invoice.to_owned(),
+            include_archived,
+        ));
         if self
             .missing
             .lock()
@@ -217,7 +226,10 @@ impl Files for FakeFiles {
     }
 
     fn archive(&self, file: &UploadFile) -> anyhow::Result<()> {
-        self.archived.lock().expect("archived").push(file.name.clone());
+        self.archived
+            .lock()
+            .expect("archived")
+            .push(file.name.clone());
         Ok(())
     }
 
@@ -237,7 +249,7 @@ struct Harness {
     files: Arc<FakeFiles>,
     cfg: Config,
     values: Option<Arc<Values>>,
-    hook: Option<Arc<dyn Fn(&str, Step) + Send + Sync>>,
+    hook: Option<UploadedHook>,
     timings: Arc<Timings>,
 }
 
@@ -323,17 +335,31 @@ fn error_file(name: &str, code: &str, description: &str) -> LoadFile {
 #[test]
 fn defaults_follow_the_documented_numbers() {
     let cfg = Config::default().resolved();
-    assert_eq!((cfg.batch_max, cfg.send_workers, cfg.confirm_workers), (200, 2, 16));
+    assert_eq!(
+        (cfg.batch_max, cfg.send_workers, cfg.confirm_workers),
+        (200, 2, 16)
+    );
     assert_eq!(cfg.prepare_concurrency, 20);
     assert_eq!(cfg.batch_wait, Duration::from_secs(2));
     assert_eq!(cfg.poll_interval, Duration::from_secs(5));
     assert_eq!(cfg.poll_max_interval, Duration::from_secs(120));
-    assert_eq!((cfg.quick_retries, cfg.quick_retry_delay), (3, Duration::from_secs(3)));
+    assert_eq!(
+        (cfg.quick_retries, cfg.quick_retry_delay),
+        (3, Duration::from_secs(3))
+    );
     assert_eq!(cfg.retry_interval, Duration::from_secs(600));
     assert_eq!(cfg.step2_xml_polls, 5);
     assert_eq!(cfg.crc_lost_after, Duration::from_secs(90));
     assert_eq!(cfg.deadline, Duration::from_secs(3 * 3600));
-    assert_eq!(Config { batch_max: 1000, ..Config::default() }.resolved().batch_max, 400);
+    assert_eq!(
+        Config {
+            batch_max: 1000,
+            ..Config::default()
+        }
+        .resolved()
+        .batch_max,
+        400
+    );
 }
 
 #[test]
@@ -341,19 +367,35 @@ fn all_steps_are_filed_and_the_step_1_batch_shares_one_upload() {
     let h = Harness::new(Portal::happy());
     let report = h.run(&["FEV1", "FEV2", "FEV3"]);
     assert_eq!(report.done, ["FEV1", "FEV2", "FEV3"]);
-    assert_eq!(report.summary(), "done=3 advanced=0 rejected=0 blocked=0 in_progress=0 unclassified=0 skipped=0");
+    assert_eq!(
+        report.summary(),
+        "done=3 advanced=0 rejected=0 blocked=0 in_progress=0 unclassified=0 skipped=0"
+    );
     let shape = h.portal.upload_shape();
     assert_eq!(shape[0], (1, 3), "one id_cargue for the whole micro-batch");
     for inv in ["FEV1", "FEV2", "FEV3"] {
         let st = h.state(inv);
-        assert_eq!((st.step, st.status), (Step::Crc, RadStatus::Confirmed), "{inv}");
+        assert_eq!(
+            (st.step, st.status),
+            (Step::Crc, RadStatus::Confirmed),
+            "{inv}"
+        );
         assert_eq!(st.folder, CARGUE);
         for step in Step::ALL {
             assert!(h.portal.uploaded(step, inv), "{inv} step {step:?}");
         }
-        assert!(st.last_detail.contains(r#"documento_soporte={"estado":"ACTIVE"}"#), "{}", st.last_detail);
+        assert!(
+            st.last_detail
+                .contains(r#"documento_soporte={"estado":"ACTIVE"}"#),
+            "{}",
+            st.last_detail
+        );
     }
-    assert_eq!(h.files.archived.lock().expect("archived").len(), 12, "every confirmed file is archived");
+    assert_eq!(
+        h.files.archived.lock().expect("archived").len(),
+        12,
+        "every confirmed file is archived"
+    );
     let snap = h.timings.snapshot();
     assert_eq!(snap.steps.len(), 4);
     assert_eq!(snap.steps[0].confirmed, 3);
@@ -380,7 +422,10 @@ fn a_sent_invoice_resumes_polling_the_same_upload_and_is_never_resent() {
     let h = Harness::new(Portal::happy());
     h.portal.uploads.lock().expect("uploads").insert(
         "old-up".into(),
-        Upload { step: Step::InvoiceZip, names: vec![name_of(Step::InvoiceZip, "FEV1")] },
+        Upload {
+            step: Step::InvoiceZip,
+            names: vec![name_of(Step::InvoiceZip, "FEV1")],
+        },
     );
     let mut sent = RadState::new("FEV1", Step::InvoiceZip);
     sent.status = RadStatus::Sent;
@@ -389,7 +434,11 @@ fn a_sent_invoice_resumes_polling_the_same_upload_and_is_never_resent() {
     h.states.save(&sent).expect("save");
     let report = h.run(&["FEV1"]);
     assert_eq!(report.done, ["FEV1"]);
-    assert_eq!(h.portal.steps_uploaded(), [2, 3, 4], "step 1 was confirmed from the stored upload id");
+    assert_eq!(
+        h.portal.steps_uploaded(),
+        [2, 3, 4],
+        "step 1 was confirmed from the stored upload id"
+    );
 }
 
 #[test]
@@ -417,7 +466,12 @@ fn a_failed_batch_is_sent_file_by_file() {
     let h = Harness::new(portal);
     let report = h.run(&["FEV1", "FEV2"]);
     assert_eq!(report.done, ["FEV1", "FEV2"]);
-    let step1: Vec<_> = h.portal.upload_shape().into_iter().filter(|(s, _)| *s == 1).collect();
+    let step1: Vec<_> = h
+        .portal
+        .upload_shape()
+        .into_iter()
+        .filter(|(s, _)| *s == 1)
+        .collect();
     assert_eq!(step1, [(1, 1), (1, 1)]);
     let snap = h.timings.snapshot();
     assert_eq!(snap.steps[0].resends["batch_split"], 2);
@@ -426,7 +480,11 @@ fn a_failed_batch_is_sent_file_by_file() {
 #[test]
 fn a_missing_file_blocks_the_invoice_with_the_spanish_reason() {
     let h = Harness::new(Portal::happy());
-    h.files.missing.lock().expect("m").insert((1, "FEV1".into()));
+    h.files
+        .missing
+        .lock()
+        .expect("m")
+        .insert((1, "FEV1".into()));
     let report = h.run(&["FEV1"]);
     assert_eq!(report.blocked, ["FEV1"]);
     let st = h.state("FEV1");
@@ -441,7 +499,11 @@ fn a_missing_file_blocks_the_invoice_with_the_spanish_reason() {
 #[test]
 fn a_missing_cuv_txt_stops_the_invoice_after_step_1() {
     let h = Harness::new(Portal::happy());
-    h.files.missing.lock().expect("m").insert((2, "FEV1".into()));
+    h.files
+        .missing
+        .lock()
+        .expect("m")
+        .insert((2, "FEV1".into()));
     let report = h.run(&["FEV1"]);
     assert_eq!(report.blocked, ["FEV1"]);
     let st = h.state("FEV1");
@@ -464,8 +526,13 @@ fn the_value_check_blocks_step_1_when_totals_differ() {
         "codigo=VALOR_FACTURA_DIFERENTE mensaje=El total del XML no coincide con el informe de convenio. valor_xml=1000 valor_convenio=1500 diferencia=-500 paso1_no_enviado=true pasos_omitidos=2,3,4"
     );
     assert!(h.portal.upload_shape().is_empty());
-    let stored = ValorXmlStore::new(h.db.pool()).stored_xml_total("FEV1").expect("stored");
-    assert_eq!(stored, Some((Decimal::new(100000, 2), "PayableAmount".to_owned())));
+    let stored = ValorXmlStore::new(h.db.pool())
+        .stored_xml_total("FEV1")
+        .expect("stored");
+    assert_eq!(
+        stored,
+        Some((Decimal::new(100000, 2), "PayableAmount".to_owned()))
+    );
 }
 
 #[test]
@@ -485,7 +552,11 @@ fn the_value_check_blocks_when_the_agreement_total_is_unavailable() {
     )));
     let report = h.run(&["FEV1"]);
     assert_eq!(report.blocked, ["FEV1"]);
-    assert!(h.state("FEV1").last_detail.contains("codigo=VALOR_CONVENIO_NO_DISPONIBLE"));
+    assert!(
+        h.state("FEV1")
+            .last_detail
+            .contains("codigo=VALOR_CONVENIO_NO_DISPONIBLE")
+    );
     // A failing agreement lookup blocks as "validation unavailable".
     let mut failing = Harness::new(Portal::happy());
     *failing.files.xml_amount.lock().expect("xml") = Some("700.00".into());
@@ -495,7 +566,10 @@ fn the_value_check_blocks_when_the_agreement_total_is_unavailable() {
     )));
     failing.run(&["FEV1"]);
     let detail = failing.state("FEV1").last_detail;
-    assert!(detail.contains("codigo=VALIDACION_VALOR_NO_DISPONIBLE"), "{detail}");
+    assert!(
+        detail.contains("codigo=VALIDACION_VALOR_NO_DISPONIBLE"),
+        "{detail}"
+    );
     assert!(detail.contains("linea ilegible"), "{detail}");
 }
 
@@ -513,9 +587,16 @@ fn without_xml_total_the_stored_one_is_used() {
     assert_eq!(h.run(&["FEV1"]).done, ["FEV1"]);
     let none = Harness::new(Portal::happy());
     let mut none = none;
-    none.values = Some(Arc::new(Values::new(ValorXmlStore::new(none.db.pool()), Box::new(|_| Ok(Some(Decimal::ONE))))));
+    none.values = Some(Arc::new(Values::new(
+        ValorXmlStore::new(none.db.pool()),
+        Box::new(|_| Ok(Some(Decimal::ONE))),
+    )));
     none.run(&["FEV9"]);
-    assert!(none.state("FEV9").last_detail.contains("codigo=VALOR_FACTURA_NO_DISPONIBLE"));
+    assert!(
+        none.state("FEV9")
+            .last_detail
+            .contains("codigo=VALOR_FACTURA_NO_DISPONIBLE")
+    );
 }
 
 #[test]
@@ -523,34 +604,51 @@ fn a_rejected_invoice_becomes_a_credit_note_and_leaves() {
     let mut portal = Portal::happy();
     portal.load = Box::new(|_, _, upload| Load {
         status: "TERMINADO".into(),
-        files: vec![error_file(&upload.names[0], "E", "La factura asociada se encuentra en estado RECHAZADA")],
+        files: vec![error_file(
+            &upload.names[0],
+            "E",
+            "La factura asociada se encuentra en estado RECHAZADA",
+        )],
         raw: String::new(),
     });
     let h = Harness::new(portal);
     let report = h.run(&["FEV1"]);
     assert_eq!(report.rejected, ["FEV1"]);
     let st = h.state("FEV1");
-    assert_eq!((st.step, st.status), (Step::InvoiceZip, RadStatus::CreditNote));
+    assert_eq!(
+        (st.step, st.status),
+        (Step::InvoiceZip, RadStatus::CreditNote)
+    );
 }
 
 #[test]
 fn a_returned_rips_json_becomes_an_adjustment_note_with_its_findings() {
     let mut portal = Portal::happy();
     portal.filters = Box::new(|portal, invoice| {
-        portal.uploaded(Step::Rips, invoice).then(|| FiltersAllItem {
-            invoice_number: invoice.into(),
-            returned: true,
-            file_id: "f1".into(),
-            services_valid: true,
-            ..FiltersAllItem::default()
-        })
+        portal
+            .uploaded(Step::Rips, invoice)
+            .then(|| FiltersAllItem {
+                invoice_number: invoice.into(),
+                returned: true,
+                file_id: "f1".into(),
+                services_valid: true,
+                ..FiltersAllItem::default()
+            })
     });
     let h = Harness::new(portal);
     let report = h.run(&["FEV1"]);
     assert_eq!(report.rejected, ["FEV1"]);
     let st = h.state("FEV1");
-    assert_eq!((st.step, st.status), (Step::Rips, RadStatus::AdjustmentNote));
-    assert!(st.last_detail.contains("findDetailsByFile=total=1 novedades=[R1|ERROR|edad|valor invalido]"), "{}", st.last_detail);
+    assert_eq!(
+        (st.step, st.status),
+        (Step::Rips, RadStatus::AdjustmentNote)
+    );
+    assert!(
+        st.last_detail
+            .contains("findDetailsByFile=total=1 novedades=[R1|ERROR|edad|valor invalido]"),
+        "{}",
+        st.last_detail
+    );
     assert_eq!(h.portal.steps_uploaded(), [1, 2, 3]);
 }
 
@@ -564,7 +662,10 @@ fn max_sends_rejects_the_step_after_the_budget() {
     assert_eq!(report.rejected, ["FEV1"]);
     let st = h.state("FEV1");
     assert_eq!(st.status, RadStatus::Rejected);
-    assert_eq!(st.last_detail, "paso=1 Radicacion rechazada: se agotaron 2 envios del paso ZIP XML/PDF.");
+    assert_eq!(
+        st.last_detail,
+        "paso=1 Radicacion rechazada: se agotaron 2 envios del paso ZIP XML/PDF."
+    );
     assert_eq!(st.sends, 2);
 }
 
@@ -573,7 +674,9 @@ fn an_upload_error_is_retried_with_doubling_quick_delay_and_recorded() {
     let calls = Arc::new(AtomicUsize::new(0));
     let seen = calls.clone();
     let mut portal = Portal::happy();
-    portal.gate = Box::new(move |_, _| (seen.fetch_add(1, Ordering::SeqCst) < 2).then(|| "red caida".to_owned()));
+    portal.gate = Box::new(move |_, _| {
+        (seen.fetch_add(1, Ordering::SeqCst) < 2).then(|| "red caida".to_owned())
+    });
     let h = Harness::new(portal);
     let report = h.run(&["FEV1"]);
     assert_eq!(report.done, ["FEV1"]);
@@ -592,7 +695,11 @@ fn step_2_losing_the_invoice_reloads_step_1_once_then_retries_step_2() {
         Load {
             status: "TERMINADO".into(),
             files: if first_failure {
-                vec![error_file(&name, "RF-FE-012", "La factura no cuenta con una factura electrónica")]
+                vec![error_file(
+                    &name,
+                    "RF-FE-012",
+                    "La factura no cuenta con una factura electrónica",
+                )]
             } else {
                 upload.names.iter().map(|n| loaded_file(n)).collect()
             },
@@ -614,7 +721,10 @@ fn step_2_losing_the_invoice_reloads_step_1_once_then_retries_step_2() {
         .filter(|(s, _, archived)| *s == 1 && *archived)
         .cloned()
         .collect();
-    assert!(!archived_lookups.is_empty(), "the step 1 re-send may use the filed copy");
+    assert!(
+        !archived_lookups.is_empty(),
+        "the step 1 re-send may use the filed copy"
+    );
     let snap = h.timings.snapshot();
     assert_eq!(snap.steps[1].resends["step2_reload"], 1);
 }
@@ -639,7 +749,11 @@ fn a_transient_message_is_quickly_re_sent() {
     let mut h = Harness::new(portal);
     h.cfg.retry_interval = Duration::from_secs(60);
     let report = h.run(&["FEV1"]);
-    assert_eq!(report.done, ["FEV1"], "a 60 s retry interval would not finish");
+    assert_eq!(
+        report.done,
+        ["FEV1"],
+        "a 60 s retry interval would not finish"
+    );
     assert_eq!(h.timings.snapshot().steps[0].resends["quick_retry"], 1);
 }
 
@@ -653,7 +767,11 @@ fn step_3_already_filed_elsewhere_is_confirmed_without_uploading() {
             status: "VALIDADO".into(),
             services_valid: true,
             is_support_document: crc,
-            support: crc.then(|| SupportDocument { status: "ACTIVE".into(), raw: "{}".into(), ..SupportDocument::default() }),
+            support: crc.then(|| SupportDocument {
+                status: "ACTIVE".into(),
+                raw: "{}".into(),
+                ..SupportDocument::default()
+            }),
             ..FiltersAllItem::default()
         })
     });
@@ -663,7 +781,11 @@ fn step_3_already_filed_elsewhere_is_confirmed_without_uploading() {
     h.states.save(&st).expect("save");
     let report = h.run(&["FEV1"]);
     assert_eq!(report.done, ["FEV1"]);
-    assert_eq!(h.portal.steps_uploaded(), [4], "step 3 was found filed by the pre-check");
+    assert_eq!(
+        h.portal.steps_uploaded(),
+        [4],
+        "step 3 was found filed by the pre-check"
+    );
 }
 
 #[test]
@@ -691,13 +813,19 @@ fn the_precheck_is_skipped_for_steps_reached_in_this_run() {
     let calls = h.portal.filters_calls.load(Ordering::SeqCst);
     assert!((2..=4).contains(&calls) && calls < 4, "{calls}");
     let skipped_calls = calls;
-    assert_eq!(skipped_calls, 2, "pre-checks were skipped: {skipped_calls} calls");
+    assert_eq!(
+        skipped_calls, 2,
+        "pre-checks were skipped: {skipped_calls} calls"
+    );
 }
 
 #[test]
 fn the_deadline_leaves_the_upload_sent_for_the_next_run() {
     let mut portal = Portal::happy();
-    portal.load = Box::new(|_, _, _| Load { status: "EN_PROCESO".into(), ..Load::default() });
+    portal.load = Box::new(|_, _, _| Load {
+        status: "EN_PROCESO".into(),
+        ..Load::default()
+    });
     let mut h = Harness::new(portal);
     h.cfg.deadline = Duration::from_millis(400);
     let report = h.run(&["FEV1"]);
@@ -740,17 +868,27 @@ fn a_step_4_upload_that_never_progressed_is_re_sent() {
                 raw: r#"{"estado":"EN_PROCESO","fecha":"2020-01-01T00:00:00Z"}"#.into(),
             };
         }
-        Load { status: "TERMINADO".into(), files: upload.names.iter().map(|n| loaded_file(n)).collect(), raw: String::new() }
+        Load {
+            status: "TERMINADO".into(),
+            files: upload.names.iter().map(|n| loaded_file(n)).collect(),
+            raw: String::new(),
+        }
     });
     portal.filters = Box::new(|portal, invoice| {
         let crc_uploads = portal.steps_uploaded().iter().filter(|s| **s == 4).count();
-        portal.uploaded(Step::Rips, invoice).then(|| FiltersAllItem {
-            invoice_number: invoice.into(),
-            services_valid: true,
-            is_support_document: crc_uploads >= 2,
-            support: (crc_uploads >= 2).then(|| SupportDocument { status: "ACTIVE".into(), raw: "{}".into(), ..SupportDocument::default() }),
-            ..FiltersAllItem::default()
-        })
+        portal
+            .uploaded(Step::Rips, invoice)
+            .then(|| FiltersAllItem {
+                invoice_number: invoice.into(),
+                services_valid: true,
+                is_support_document: crc_uploads >= 2,
+                support: (crc_uploads >= 2).then(|| SupportDocument {
+                    status: "ACTIVE".into(),
+                    raw: "{}".into(),
+                    ..SupportDocument::default()
+                }),
+                ..FiltersAllItem::default()
+            })
     });
     let h = Harness::new(portal);
     let report = h.run(&["FEV1"]);
@@ -765,7 +903,9 @@ fn the_uploaded_hook_fires_per_upload_and_a_panic_does_not_break_the_run() {
     let log = seen.clone();
     let mut h = Harness::new(Portal::happy());
     h.hook = Some(Arc::new(move |invoice, step| {
-        log.lock().expect("log").push((invoice.to_owned(), step.as_i16()));
+        log.lock()
+            .expect("log")
+            .push((invoice.to_owned(), step.as_i16()));
         if step == Step::Cuv {
             panic!("hook failure");
         }
@@ -773,7 +913,10 @@ fn the_uploaded_hook_fires_per_upload_and_a_panic_does_not_break_the_run() {
     let report = h.run(&["FEV1"]);
     assert_eq!(report.done, ["FEV1"]);
     let seen = seen.lock().expect("seen").clone();
-    assert_eq!(seen.iter().map(|(_, s)| *s).collect::<Vec<_>>(), [1, 2, 3, 4]);
+    assert_eq!(
+        seen.iter().map(|(_, s)| *s).collect::<Vec<_>>(),
+        [1, 2, 3, 4]
+    );
 }
 
 #[test]
@@ -784,7 +927,10 @@ fn batches_never_exceed_batch_max() {
     let report = h.run(&["FEV1", "FEV2", "FEV3", "FEV4", "FEV5"]);
     assert_eq!(report.done.len(), 5);
     for (step, files) in h.portal.upload_shape() {
-        assert!(files <= 2, "step {step} uploaded {files} files in one batch");
+        assert!(
+            files <= 2,
+            "step {step} uploaded {files} files in one batch"
+        );
     }
 }
 

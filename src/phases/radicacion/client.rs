@@ -137,8 +137,7 @@ impl MutualSerClient {
             .with_timeout(cfg.api_timeout)
             .with_ca_file(cfg.ca_file.as_deref());
         let http = crate::http::build_client(&api_options)?;
-        let upload_options =
-            crate::http::ClientOptions::default().with_timeout(cfg.upload_timeout);
+        let upload_options = crate::http::ClientOptions::default().with_timeout(cfg.upload_timeout);
         let upload_http = crate::http::build_client(&upload_options)?;
         let login = LoginConfig::from(&cfg);
         let login_http = login_client(&cfg)?;
@@ -323,7 +322,10 @@ impl MutualSerClient {
         Ok((value, raw))
     }
 
-    fn signed_urls(&self, names: &[String]) -> ApiResult<std::collections::HashMap<String, String>> {
+    fn signed_urls(
+        &self,
+        names: &[String],
+    ) -> ApiResult<std::collections::HashMap<String, String>> {
         let mut out = std::collections::HashMap::new();
         for chunk in names.chunks(self.cfg.signed_url_chunk.max(1)) {
             let (answer, _) = self.call_json(
@@ -410,7 +412,12 @@ impl MutualSerClient {
             }
         };
         permit.finish(failure.is_none());
-        self.observe("put", started, failure.is_some(), retried.load(Ordering::Relaxed));
+        self.observe(
+            "put",
+            started,
+            failure.is_some(),
+            retried.load(Ordering::Relaxed),
+        );
         failure.map_or(Ok(()), |message| Err(ApiError::Other(message)))
     }
 
@@ -518,7 +525,12 @@ impl RadApi for MutualSerClient {
                 })
             })
             .collect();
-        self.call(Method::POST, "/upload-files", &[], Some(&Value::Array(entries)))?;
+        self.call(
+            Method::POST,
+            "/upload-files",
+            &[],
+            Some(&Value::Array(entries)),
+        )?;
         Ok(id)
     }
 
@@ -663,7 +675,11 @@ fn error_codes(errors: Option<&Value>, messages: Option<&Value>) -> Vec<String> 
     let mut out = Vec::new();
     for e in errors.and_then(Value::as_array).into_iter().flatten() {
         let code = field(e, "code");
-        let code = if code.is_empty() { field(e, "codigo") } else { code };
+        let code = if code.is_empty() {
+            field(e, "codigo")
+        } else {
+            code
+        };
         if !code.is_empty() {
             out.push(code);
         }
@@ -776,10 +792,16 @@ struct SlowWatch {
 impl SlowWatch {
     fn start(every: Option<Duration>, op: &'static str, url: &reqwest::Url) -> SlowWatch {
         let Some(every) = every.filter(|e| !e.is_zero()) else {
-            return SlowWatch { stop: None, handle: None };
+            return SlowWatch {
+                stop: None,
+                handle: None,
+            };
         };
         let (stop, done) = crossbeam_channel::bounded::<()>(0);
-        let (host, path) = (url.host_str().unwrap_or_default().to_owned(), url.path().to_owned());
+        let (host, path) = (
+            url.host_str().unwrap_or_default().to_owned(),
+            url.path().to_owned(),
+        );
         let started = std::time::Instant::now();
         let handle = std::thread::spawn(move || {
             while let Err(crossbeam_channel::RecvTimeoutError::Timeout) = done.recv_timeout(every) {
@@ -835,16 +857,19 @@ fn login_client(cfg: &ClientConfig) -> anyhow::Result<Client> {
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none());
     if let Some(path) = cfg.ca_file.as_deref().filter(|p| !p.is_empty()) {
-        let pem = std::fs::read(path)
-            .with_context(|| format!("no se pudo leer el archivo CA {path}"))?;
-        let certs = reqwest::Certificate::from_pem_bundle(&pem)
-            .with_context(|| format!("el archivo CA no contiene certificados PEM válidos: {path}"))?;
+        let pem =
+            std::fs::read(path).with_context(|| format!("no se pudo leer el archivo CA {path}"))?;
+        let certs = reqwest::Certificate::from_pem_bundle(&pem).with_context(|| {
+            format!("el archivo CA no contiene certificados PEM válidos: {path}")
+        })?;
         builder = builder.tls_built_in_root_certs(false);
         for cert in certs {
             builder = builder.add_root_certificate(cert);
         }
     }
-    builder.build().context("no se pudo crear el cliente de login")
+    builder
+        .build()
+        .context("no se pudo crear el cliente de login")
 }
 
 impl LoginConfig {
@@ -860,7 +885,10 @@ impl LoginConfig {
             .map_err(|err| format!("tocumen: login: {}", err.without_url()))?;
         let status = response.status();
         if status.is_redirection() {
-            return Err(format!("tocumen: login redirected (HTTP {})", status.as_u16()));
+            return Err(format!(
+                "tocumen: login redirected (HTTP {})",
+                status.as_u16()
+            ));
         }
         if status.as_u16() != 200 {
             return Err(format!("tocumen: login failed (HTTP {})", status.as_u16()));
@@ -873,7 +901,10 @@ impl LoginConfig {
         if token.is_empty() {
             return Err("tocumen: login response has no access_token".into());
         }
-        let expires_in = answer.get("expires_in").and_then(Value::as_i64).unwrap_or(0);
+        let expires_in = answer
+            .get("expires_in")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
         Ok(FetchedToken {
             expires_at: Some(token_expiry(&token, expires_in)),
             token,
@@ -918,15 +949,16 @@ mod tests {
     }
 
     fn login_ok(req: &RecordedRequest) -> Option<MockResponse> {
-        (req.path == "/login").then(|| {
-            MockResponse::json(200, r#"{"access_token":"tok-1","expires_in":3600}"#)
-        })
+        (req.path == "/login")
+            .then(|| MockResponse::json(200, r#"{"access_token":"tok-1","expires_in":3600}"#))
     }
 
     #[test]
     fn requests_carry_identity_headers_and_a_bearer_token() {
         let server = MockServer::start(|req| {
-            login_ok(req).unwrap_or_else(|| MockResponse::json(200, r#"{"estado":"TERMINADO","archivos":[]}"#))
+            login_ok(req).unwrap_or_else(|| {
+                MockResponse::json(200, r#"{"estado":"TERMINADO","archivos":[]}"#)
+            })
         });
         let client = client_for(&server);
         client.find_load("abc", None).expect("find load");
@@ -935,7 +967,10 @@ mod tests {
         let login: Value = serde_json::from_slice(&requests[0].body).expect("login body");
         assert_eq!(login, json!({"username": "user", "password": "secret"}));
         let call = &requests[1];
-        assert_eq!((call.method.as_str(), call.path.as_str()), ("POST", "/rips-api/findLoad"));
+        assert_eq!(
+            (call.method.as_str(), call.path.as_str()),
+            ("POST", "/rips-api/findLoad")
+        );
         assert_eq!(call.header("authorization"), Some("Bearer tok-1"));
         assert_eq!(call.header("organizacion"), Some("900111222"));
         assert_eq!(call.header("organizacionname"), Some("ORG"));
@@ -957,7 +992,10 @@ mod tests {
         let server = MockServer::start(move |req| {
             if req.path == "/login" {
                 let n = seen.fetch_add(1, Ordering::SeqCst) + 1;
-                return MockResponse::json(200, &format!(r#"{{"access_token":"tok-{n}","expires_in":3600}}"#));
+                return MockResponse::json(
+                    200,
+                    &format!(r#"{{"access_token":"tok-{n}","expires_in":3600}}"#),
+                );
             }
             let mut calls = calls.lock().expect("calls");
             *calls += 1;
@@ -967,7 +1005,9 @@ mod tests {
                 MockResponse::json(200, r#"{"estado":"TERMINADO"}"#)
             }
         });
-        let load = client_for(&server).find_load("abc", None).expect("find load");
+        let load = client_for(&server)
+            .find_load("abc", None)
+            .expect("find load");
         assert_eq!(load.status, "TERMINADO");
         assert_eq!(logins.load(Ordering::SeqCst), 2);
         let auth: Vec<_> = server
@@ -982,7 +1022,9 @@ mod tests {
     #[test]
     fn a_failed_login_is_reported_without_credentials() {
         let server = MockServer::start(|_| MockResponse::text(403, "no"));
-        let err = client_for(&server).find_load("abc", None).expect_err("must fail");
+        let err = client_for(&server)
+            .find_load("abc", None)
+            .expect_err("must fail");
         let text = err.to_string();
         assert!(text.contains("tocumen: login failed (HTTP 403)"), "{text}");
         assert!(!text.contains("secret"), "{text}");
@@ -993,7 +1035,9 @@ mod tests {
         let server = MockServer::start(|req| {
             login_ok(req).unwrap_or_else(|| MockResponse::text(400, &"x ".repeat(500)))
         });
-        let err = client_for(&server).find_load("abc", None).expect_err("must fail");
+        let err = client_for(&server)
+            .find_load("abc", None)
+            .expect_err("must fail");
         match err {
             ApiError::Status { code, body, .. } => {
                 assert_eq!(code, 400);
@@ -1015,9 +1059,13 @@ mod tests {
             login_ok(req).unwrap_or_else(|| MockResponse::json(200, answer))
         });
         let client = client_for(&server);
-        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z").expect("date").with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z")
+            .expect("date")
+            .with_timezone(&Utc);
         let client = client.with_clock(move || now);
-        let since = DateTime::parse_from_rfc3339("2026-09-20T15:00:00Z").expect("date").with_timezone(&Utc);
+        let since = DateTime::parse_from_rfc3339("2026-09-20T15:00:00Z")
+            .expect("date")
+            .with_timezone(&Utc);
         let load = client.find_load("up-1", Some(since)).expect("load");
 
         let body: Value = serde_json::from_slice(&server.requests()[1].body).expect("body");
@@ -1027,14 +1075,25 @@ mod tests {
         assert_eq!(body["fecha_inicial"], format!("{} 00:00:00", local(since)));
         assert_eq!(
             body["fecha_final"],
-            format!("{} 23:59:59", dmy(now.with_timezone(&Local) + chrono::Duration::days(1)))
+            format!(
+                "{} 23:59:59",
+                dmy(now.with_timezone(&Local) + chrono::Duration::days(1))
+            )
         );
         assert_eq!(load.status, "TERMINADO");
         let file = &load.files[0];
-        assert_eq!((file.id.as_str(), file.name.as_str(), file.status.as_str()), ("7", "FEV1.txt", "CARGADO"));
+        assert_eq!(
+            (file.id.as_str(), file.name.as_str(), file.status.as_str()),
+            ("7", "FEV1.txt", "CARGADO")
+        );
         assert_eq!(file.error_codes, ["E9", "E8", "RF-FE-013"]);
         assert_eq!(file.messages[0].description, "CUV ya asociado");
-        assert!(load.raw.starts_with(r#"{"estado":"TERMINADO","archivos":[{"id":7"#), "{}", load.raw);
+        assert!(
+            load.raw
+                .starts_with(r#"{"estado":"TERMINADO","archivos":[{"id":7"#),
+            "{}",
+            load.raw
+        );
     }
 
     #[test]
@@ -1042,11 +1101,18 @@ mod tests {
         let server = MockServer::start(|req| {
             login_ok(req).unwrap_or_else(|| MockResponse::json(200, r#"{"estado":"EN_PROCESO"}"#))
         });
-        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z").expect("date").with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z")
+            .expect("date")
+            .with_timezone(&Utc);
         let client = client_for(&server).with_clock(move || now);
-        client.find_load("up", Some(now + chrono::Duration::days(3))).expect("load");
+        client
+            .find_load("up", Some(now + chrono::Duration::days(3)))
+            .expect("load");
         let body: Value = serde_json::from_slice(&server.requests()[1].body).expect("body");
-        assert_eq!(body["fecha_inicial"], format!("{} 00:00:00", dmy(now.with_timezone(&Local))));
+        assert_eq!(
+            body["fecha_inicial"],
+            format!("{} 00:00:00", dmy(now.with_timezone(&Local)))
+        );
     }
 
     #[test]
@@ -1059,7 +1125,10 @@ mod tests {
             let mut calls = calls.lock().expect("calls");
             *calls += 1;
             if *calls < 3 {
-                return MockResponse::json(200, r#"{"content":[{"billId":"OTHER","status":"ACTIVE"}]}"#);
+                return MockResponse::json(
+                    200,
+                    r#"{"content":[{"billId":"OTHER","status":"ACTIVE"}]}"#,
+                );
             }
             MockResponse::json(
                 200,
@@ -1067,15 +1136,28 @@ mod tests {
                     "uploadDate":"d1","validationDate":"d2","errors":[{"code":"C1"}]}]}"#,
             )
         });
-        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z").expect("date").with_timezone(&Utc);
+        let now = DateTime::parse_from_rfc3339("2026-09-25T15:00:00Z")
+            .expect("date")
+            .with_timezone(&Utc);
         let doc = client_for(&server)
             .with_clock(move || now)
             .filter_xml("FEV1")
             .expect("filter")
             .expect("found");
-        assert_eq!((doc.bill_id.as_str(), doc.status.as_str(), doc.status_type.as_str()), ("fev1", "ACTIVE", "2"));
+        assert_eq!(
+            (
+                doc.bill_id.as_str(),
+                doc.status.as_str(),
+                doc.status_type.as_str()
+            ),
+            ("fev1", "ACTIVE", "2")
+        );
         assert_eq!(doc.error_codes, ["C1"]);
-        let requests: Vec<_> = server.requests().into_iter().filter(|r| r.path.starts_with("/rips-api/filter-xml")).collect();
+        let requests: Vec<_> = server
+            .requests()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/rips-api/filter-xml"))
+            .collect();
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[0].path, "/rips-api/filter-xml/?page=0&req=100");
         let ranges: Vec<(Value, Value)> = requests
@@ -1104,19 +1186,38 @@ mod tests {
         let server = MockServer::start(move |req| {
             login_ok(req).unwrap_or_else(|| MockResponse::json(200, answer))
         });
-        let item = client_for(&server).filters_all("FEV1").expect("filters").expect("found");
+        let item = client_for(&server)
+            .filters_all("FEV1")
+            .expect("filters")
+            .expect("found");
         assert_eq!(item.status, "VALIDADO");
-        assert_eq!((item.event_id.as_str(), item.file_id.as_str(), item.id_cargue.as_str()), ("5", "f1", "c1"));
+        assert_eq!(
+            (
+                item.event_id.as_str(),
+                item.file_id.as_str(),
+                item.id_cargue.as_str()
+            ),
+            ("5", "f1", "c1")
+        );
         assert!(item.returned && item.is_support_document && item.services_valid);
         assert_eq!(item.services, r#"[{"a":1}]"#);
         let support = item.support.expect("support");
-        assert_eq!((support.status.as_str(), support.file_name.as_str()), ("ACTIVE", "CRC.zip"));
-        assert_eq!(support.raw, r#"{"id":"s1","nombre_archivo":"CRC.zip","estado":"ACTIVE"}"#);
+        assert_eq!(
+            (support.status.as_str(), support.file_name.as_str()),
+            ("ACTIVE", "CRC.zip")
+        );
+        assert_eq!(
+            support.raw,
+            r#"{"id":"s1","nombre_archivo":"CRC.zip","estado":"ACTIVE"}"#
+        );
         let body: Value = serde_json::from_slice(&server.requests()[1].body).expect("body");
         assert_eq!(body["filtros"]["numero_factura"], "FEV1");
         assert_eq!(body["filtros"]["organizacion"], "900111222");
         assert_eq!(body["filtros"]["fecha_inicial"], "01/01/2025 00:00:00");
-        assert_eq!(body["paginacion"], json!({"total": 100, "pagina_actual": 1}));
+        assert_eq!(
+            body["paginacion"],
+            json!({"total": 100, "pagina_actual": 1})
+        );
     }
 
     #[test]
@@ -1126,48 +1227,75 @@ mod tests {
                 MockResponse::json(200, r#"{"contenido":[{"numero_factura":"FEV1","servicios":null,"documento_soporte":null}]}"#)
             })
         });
-        let item = client_for(&server).filters_all("FEV1").expect("filters").expect("found");
+        let item = client_for(&server)
+            .filters_all("FEV1")
+            .expect("filters")
+            .expect("found");
         assert!(!item.services_valid && item.support.is_none() && !item.returned);
         let none = MockServer::start(|req| {
             login_ok(req).unwrap_or_else(|| MockResponse::json(200, r#"{"contenido":[]}"#))
         });
-        assert_eq!(client_for(&none).filters_all("FEV1").expect("filters"), None);
+        assert_eq!(
+            client_for(&none).filters_all("FEV1").expect("filters"),
+            None
+        );
     }
 
     #[test]
     fn file_details_escape_the_id_and_map_the_findings() {
         let server = MockServer::start(|req| {
             login_ok(req).unwrap_or_else(|| {
-                MockResponse::json(200, r#"[{"codigo":"R1","tipo":"ERROR","campo":"edad","detalle":"mal"}]"#)
+                MockResponse::json(
+                    200,
+                    r#"[{"codigo":"R1","tipo":"ERROR","campo":"edad","detalle":"mal"}]"#,
+                )
             })
         });
         let details = client_for(&server).file_details("a b/1").expect("details");
-        assert_eq!(server.requests()[1].path, "/rips-api/core/findDetailsByFile/a%20b%2F1");
+        assert_eq!(
+            server.requests()[1].path,
+            "/rips-api/core/findDetailsByFile/a%20b%2F1"
+        );
         assert_eq!(
             details,
-            [FileDetail { code: "R1".into(), kind: "ERROR".into(), field: "edad".into(), detail: "mal".into() }]
+            [FileDetail {
+                code: "R1".into(),
+                kind: "ERROR".into(),
+                field: "edad".into(),
+                detail: "mal".into()
+            }]
         );
     }
 
     /// A mock of the whole upload exchange; storage PUTs go to the same server.
     fn upload_server(put_failures: usize, load_status: &'static str) -> MockServer {
         let failures = Mutex::new(put_failures);
-        let base = Mutex::new(String::new());
-        let server = MockServer::start(move |req| {
+        MockServer::start(move |req| {
             if let Some(login) = login_ok(req) {
                 return login;
             }
             let path = req.path.split('?').next().unwrap_or_default().to_owned();
             match path.as_str() {
                 "/rips-api/upload" | "/rips-api/upload-files" => MockResponse::json(200, "{}"),
-                "/rips-api/findLoad" => MockResponse::json(200, &format!(r#"{{"estado":"{load_status}"}}"#)),
+                "/rips-api/findLoad" => {
+                    MockResponse::json(200, &format!(r#"{{"estado":"{load_status}"}}"#))
+                }
                 "/rips-api/signedUrl/getUrlUploadFile" => {
                     let host = req.header("host").unwrap_or_default().to_owned();
-                    *base.lock().expect("base") = host.clone();
-                    let names = req.path.split("fileNames=").nth(1).unwrap_or_default().replace("%2C", ",");
+                    let names = req
+                        .path
+                        .split("fileNames=")
+                        .nth(1)
+                        .unwrap_or_default()
+                        .replace("%2C", ",");
                     let map: serde_json::Map<String, Value> = names
                         .split(',')
-                        .map(|n| (n.to_owned(), json!(format!("http://{host}/storage/{n}?sig=SECRET"))))
+                        .map(|n| {
+                            (
+                                n.to_owned(),
+                                json!(format!("http://{host}/storage/{n}?sig=SECRET")),
+                            )
+                        })
                         .collect();
                     MockResponse::json(200, &Value::Object(map).to_string())
                 }
@@ -1182,8 +1310,7 @@ mod tests {
                 }
                 _ => MockResponse::text(404, ""),
             }
-        });
-        server
+        })
     }
 
     fn files_on_disk(dir: &std::path::Path, names: &[(&str, &str)]) -> Vec<UploadFile> {
@@ -1208,20 +1335,34 @@ mod tests {
         let server = upload_server(0, "EN_PROCESO");
         let dir = tempfile::tempdir().expect("dir");
         let files = files_on_disk(dir.path(), &[("FEV1.txt", "{}"), ("FEV2.txt", "{\"a\":1}")]);
-        let id = client_for(&server).upload(Step::Cuv, &files).expect("upload");
+        let id = client_for(&server)
+            .upload(Step::Cuv, &files)
+            .expect("upload");
         assert_eq!(id, "id-1");
 
         let requests = server.requests();
         let paths: Vec<String> = requests
             .iter()
-            .map(|r| format!("{} {}", r.method, r.path.split('?').next().unwrap_or_default()))
+            .map(|r| {
+                format!(
+                    "{} {}",
+                    r.method,
+                    r.path.split('?').next().unwrap_or_default()
+                )
+            })
             .collect();
         assert_eq!(paths[1], "POST /rips-api/upload");
         assert_eq!(paths[2], "POST /rips-api/findLoad");
         assert_eq!(paths[3], "GET /rips-api/signedUrl/getUrlUploadFile");
-        let puts: Vec<_> = paths.iter().filter(|p| p.starts_with("PUT /storage/")).collect();
+        let puts: Vec<_> = paths
+            .iter()
+            .filter(|p| p.starts_with("PUT /storage/"))
+            .collect();
         assert_eq!(puts.len(), 2);
-        assert_eq!(paths.last().map(String::as_str), Some("POST /rips-api/upload-files"));
+        assert_eq!(
+            paths.last().map(String::as_str),
+            Some("POST /rips-api/upload-files")
+        );
 
         let register: Value = serde_json::from_slice(&requests[1].body).expect("body");
         assert_eq!(
@@ -1229,7 +1370,8 @@ mod tests {
             json!({"cantidad": 2, "id_cargue": "id-1", "id_tipo": "5072926906777600",
                    "nombres": ["FEV1.txt", "FEV2.txt"], "organizacion": "900111222"})
         );
-        let confirm: Value = serde_json::from_slice(&requests.last().expect("last").body).expect("body");
+        let confirm: Value =
+            serde_json::from_slice(&requests.last().expect("last").body).expect("body");
         let entries = confirm.as_array().expect("array");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["nombre"], "FEV1.txt");
@@ -1237,11 +1379,20 @@ mod tests {
         assert_eq!(entries[0]["extension"], "txt");
         assert_eq!(entries[0]["id_tipo"], "5072926906777600");
         assert_eq!(entries[0]["tamano"], 0.0);
-        assert!(entries[0]["codigo"].as_str().expect("codigo").ends_with(".txt"));
+        assert!(
+            entries[0]["codigo"]
+                .as_str()
+                .expect("codigo")
+                .ends_with(".txt")
+        );
         assert_eq!(entries[0]["mensajes"], json!([]));
         let put = requests.iter().find(|r| r.method == "PUT").expect("put");
         assert_eq!(put.header("content-type"), Some("application/octet-stream"));
-        assert_eq!(put.header("authorization"), None, "signed URLs carry no bearer token");
+        assert_eq!(
+            put.header("authorization"),
+            None,
+            "signed URLs carry no bearer token"
+        );
     }
 
     #[test]
@@ -1249,8 +1400,14 @@ mod tests {
         let server = upload_server(2, "EN_PROCESO");
         let dir = tempfile::tempdir().expect("dir");
         let files = files_on_disk(dir.path(), &[("FEV1.json", "{}")]);
-        client_for(&server).upload(Step::Rips, &files).expect("upload");
-        let puts = server.requests().iter().filter(|r| r.method == "PUT").count();
+        client_for(&server)
+            .upload(Step::Rips, &files)
+            .expect("upload");
+        let puts = server
+            .requests()
+            .iter()
+            .filter(|r| r.method == "PUT")
+            .count();
         assert_eq!(puts, 3, "two 503 answers, then success");
     }
 
@@ -1259,8 +1416,13 @@ mod tests {
         let server = upload_server(0, "TERMINADO");
         let dir = tempfile::tempdir().expect("dir");
         let files = files_on_disk(dir.path(), &[("FEV1.txt", "{}")]);
-        let err = client_for(&server).upload(Step::Cuv, &files).expect_err("must fail");
-        assert!(err.to_string().contains("is not EN_PROCESO after creation"), "{err}");
+        let err = client_for(&server)
+            .upload(Step::Cuv, &files)
+            .expect_err("must fail");
+        assert!(
+            err.to_string().contains("is not EN_PROCESO after creation"),
+            "{err}"
+        );
         assert!(server.requests().iter().all(|r| r.method != "PUT"));
     }
 
@@ -1269,12 +1431,22 @@ mod tests {
         let server = upload_server(100, "EN_PROCESO");
         let dir = tempfile::tempdir().expect("dir");
         let files = files_on_disk(dir.path(), &[("FEV1.txt", "{}")]);
-        let err = client_for(&server).upload(Step::Cuv, &files).expect_err("must fail");
+        let err = client_for(&server)
+            .upload(Step::Cuv, &files)
+            .expect_err("must fail");
         let text = err.to_string();
         assert!(text.contains("1 of 1 file uploads failed"), "{text}");
         assert!(text.contains("storage HTTP=503"), "{text}");
-        assert!(!text.contains("SECRET"), "signed query must never be reported: {text}");
-        assert!(server.requests().iter().all(|r| !r.path.ends_with("upload-files")));
+        assert!(
+            !text.contains("SECRET"),
+            "signed query must never be reported: {text}"
+        );
+        assert!(
+            server
+                .requests()
+                .iter()
+                .all(|r| !r.path.ends_with("upload-files"))
+        );
     }
 
     #[test]
@@ -1287,7 +1459,10 @@ mod tests {
 
     #[test]
     fn step_types_and_operation_labels() {
-        assert_eq!(step_type(Step::InvoiceZip), ("1da64d49-f5f7-4d70-8a7c-640db4816521", "zip"));
+        assert_eq!(
+            step_type(Step::InvoiceZip),
+            ("1da64d49-f5f7-4d70-8a7c-640db4816521", "zip")
+        );
         assert_eq!(step_type(Step::Cuv).1, "txt");
         assert_eq!(step_type(Step::Rips), ("5643548095414272", "json"));
         assert_eq!(step_type(Step::Crc), ("5655362556395520", "zip"));

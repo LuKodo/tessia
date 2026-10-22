@@ -150,6 +150,12 @@ impl Config {
     }
 }
 
+/// Told once per successful upload of a step of an invoice.
+pub type UploadedHook = Arc<dyn Fn(&str, Step) + Send + Sync>;
+
+/// Items to start with, items to skip, items already done.
+type Loaded = (Vec<Item>, Vec<RadState>, Vec<RadState>);
+
 /// Everything the engine talks to.
 pub struct Deps {
     pub api: Arc<dyn RadApi>,
@@ -161,7 +167,7 @@ pub struct Deps {
     pub now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     /// Told once per successful upload of a step of an invoice, after the
     /// progress was recorded. Must be cheap; a panic in it is contained.
-    pub on_uploaded: Option<Arc<dyn Fn(&str, Step) + Send + Sync>>,
+    pub on_uploaded: Option<UploadedHook>,
 }
 
 impl Deps {
@@ -251,15 +257,15 @@ struct Item {
 }
 
 impl Item {
-    fn new(st: RadState) -> Box<Item> {
-        Box::new(Item {
+    fn new(st: RadState) -> Item {
+        Item {
             st,
             file: None,
             send_errors: 0,
             sent_tick: None,
             queued_at: None,
             advanced_here: false,
-        })
+        }
     }
 }
 
@@ -274,14 +280,16 @@ enum Queue {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct TimerEntry {
     due: Instant,
     seq: u64,
     queue: Queue,
-    item: Box<Item>,
+    item: Item,
 }
 
 impl PartialEq for TimerEntry {
@@ -316,7 +324,7 @@ struct Timer {
 }
 
 impl Timer {
-    fn schedule(&self, delay: Duration, queue: Queue, item: Box<Item>) {
+    fn schedule(&self, delay: Duration, queue: Queue, item: Item) {
         let mut state = lock(&self.state);
         state.seq += 1;
         let entry = TimerEntry {
@@ -415,11 +423,7 @@ impl Engine {
 
     /// The starting state of every invoice: the stored state, else a fresh
     /// step 1 seed.
-    fn load(
-        &self,
-        cargue_id: &str,
-        invoices: &[String],
-    ) -> Result<(Vec<Box<Item>>, Vec<RadState>, Vec<RadState>)> {
+    fn load(&self, cargue_id: &str, invoices: &[String]) -> Result<Loaded> {
         let tm = &self.deps.timings;
         let t0 = tm.now();
         let stored = self.deps.states.load(invoices);
@@ -453,7 +457,9 @@ impl Engine {
 
 /// Normalized, deduplicated, non-empty invoices in order.
 fn normalize_all(invoices: &[String]) -> Vec<String> {
-    crate::domain::invoice::normalize_all(invoices.iter().map(|i| crate::domain::normalize_invoice(i)))
+    crate::domain::invoice::normalize_all(
+        invoices.iter().map(|i| crate::domain::normalize_invoice(i)),
+    )
 }
 
 /// Joins the workers, giving up after `grace` (in-flight HTTP calls cannot be
@@ -467,7 +473,10 @@ fn join_with_grace(workers: Vec<JoinHandle<()>>, grace: Duration) {
         let _ = tx.send(());
     });
     if rx.recv_timeout(grace).is_err() {
-        tracing::warn!(grace_s = grace.as_secs(), "workers still busy after the shutdown grace");
+        tracing::warn!(
+            grace_s = grace.as_secs(),
+            "workers still busy after the shutdown grace"
+        );
     }
 }
 
@@ -480,9 +489,9 @@ struct Shared {
     values: Option<Arc<Values>>,
     tm: Arc<Timings>,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
-    hook: Option<Arc<dyn Fn(&str, Step) + Send + Sync>>,
-    send_tx: Vec<Sender<Box<Item>>>,
-    confirm_tx: Vec<Sender<Box<Item>>>,
+    hook: Option<UploadedHook>,
+    send_tx: Vec<Sender<Item>>,
+    confirm_tx: Vec<Sender<Item>>,
     timer: Timer,
     cancelled: AtomicBool,
     done_tx: Mutex<Option<Sender<()>>>,
@@ -495,11 +504,7 @@ struct Shared {
 
 impl Shared {
     /// Builds the shared state and starts the timer and the 4 stages.
-    fn start(
-        cfg: &Config,
-        deps: &Deps,
-        items: &[Box<Item>],
-    ) -> (Arc<Shared>, Vec<JoinHandle<()>>) {
+    fn start(cfg: &Config, deps: &Deps, items: &[Item]) -> (Arc<Shared>, Vec<JoinHandle<()>>) {
         let (mut send_tx, mut send_rx, mut confirm_tx, mut confirm_rx) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for _ in Step::ALL {
@@ -539,7 +544,12 @@ impl Shared {
         }));
         for step in Step::ALL {
             let i = idx(step);
-            workers.extend(shared.start_stage(step, send_rx[i].clone(), confirm_rx[i].clone(), &done_rx));
+            workers.extend(shared.start_stage(
+                step,
+                send_rx[i].clone(),
+                confirm_rx[i].clone(),
+                &done_rx,
+            ));
         }
         (shared, workers)
     }
@@ -547,12 +557,12 @@ impl Shared {
     fn start_stage(
         self: &Arc<Self>,
         step: Step,
-        send_rx: Receiver<Box<Item>>,
-        confirm_rx: Receiver<Box<Item>>,
+        send_rx: Receiver<Item>,
+        confirm_rx: Receiver<Item>,
         done: &Receiver<()>,
     ) -> Vec<JoinHandle<()>> {
         let mut handles = Vec::new();
-        let (batch_tx, batch_rx) = bounded::<Vec<Box<Item>>>(0);
+        let (batch_tx, batch_rx) = bounded::<Vec<Item>>(0);
         {
             let (shared, done) = (self.clone(), done.clone());
             handles.push(std::thread::spawn(move || {
@@ -561,13 +571,15 @@ impl Shared {
         }
         for _ in 0..self.cfg.send_workers {
             let (shared, done, batch_rx) = (self.clone(), done.clone(), batch_rx.clone());
-            handles.push(std::thread::spawn(move || loop {
-                select! {
-                    recv(done) -> _ => return,
-                    recv(batch_rx) -> batch => match batch {
-                        Ok(batch) => shared.send_batch(step, batch),
-                        Err(_) => return,
-                    },
+            handles.push(std::thread::spawn(move || {
+                loop {
+                    select! {
+                        recv(done) -> _ => return,
+                        recv(batch_rx) -> batch => match batch {
+                            Ok(batch) => shared.send_batch(step, batch),
+                            Err(_) => return,
+                        },
+                    }
                 }
             }));
         }
@@ -632,7 +644,7 @@ impl Shared {
         (self.now)()
     }
 
-    fn sender(&self, queue: Queue) -> &Sender<Box<Item>> {
+    fn sender(&self, queue: Queue) -> &Sender<Item> {
         match queue {
             Queue::Send(step) => &self.send_tx[idx(step)],
             Queue::Confirm(step) => &self.confirm_tx[idx(step)],
@@ -640,7 +652,7 @@ impl Shared {
     }
 
     /// Puts a due item into its queue (unless the run was cancelled).
-    fn deliver(&self, queue: Queue, mut item: Box<Item>) {
+    fn deliver(&self, queue: Queue, mut item: Item) {
         if self.is_cancelled() {
             return;
         }
@@ -650,7 +662,7 @@ impl Shared {
 
     /// Queues `item` after `delay`; `kind` names the wait for the timings (the
     /// scheduled delay is recorded, not how long the timer really took).
-    fn push(&self, queue: Queue, mut item: Box<Item>, delay: Duration, kind: &str) {
+    fn push(&self, queue: Queue, mut item: Item, delay: Duration, kind: &str) {
         if delay.is_zero() {
             item.queued_at = Some(self.tm.now());
             let _ = self.sender(queue).send(item);
@@ -666,11 +678,16 @@ impl Shared {
             .unwrap_or(Duration::ZERO)
     }
 
-    fn dispatch(&self, item: Box<Item>) {
+    fn dispatch(&self, item: Item) {
         match item.st.status {
             RadStatus::Sent => {
                 let step = item.st.step;
-                self.push(Queue::Confirm(step), item, Duration::ZERO, sleep::RESUME_DELAY);
+                self.push(
+                    Queue::Confirm(step),
+                    item,
+                    Duration::ZERO,
+                    sleep::RESUME_DELAY,
+                );
             }
             _ => {
                 let (step, delay) = (item.st.step, self.until(item.st.next_attempt_at));
@@ -683,7 +700,11 @@ impl Shared {
     /// (the quiet part of a run).
     fn announce_waiting(&self, step: Step, pending: usize) {
         self.waiting[idx(step)].call_once(|| {
-            tracing::info!(step = step.as_i16(), pending, "waiting for Mutual Ser confirmation");
+            tracing::info!(
+                step = step.as_i16(),
+                pending,
+                "waiting for Mutual Ser confirmation"
+            );
         });
     }
 
@@ -700,7 +721,7 @@ impl Shared {
     }
 
     /// The item leaves the pipeline in category `cat`.
-    fn finish(&self, mut item: Box<Item>, cat: Category) {
+    fn finish(&self, mut item: Item, cat: Category) {
         self.save(&mut item);
         lock(&self.finals).insert(item.st.invoice.clone(), cat);
         tracing::info!(
@@ -716,12 +737,7 @@ impl Shared {
     }
 
     /// Groups ready items into micro-batches.
-    fn collect(
-        &self,
-        send_rx: &Receiver<Box<Item>>,
-        out: &Sender<Vec<Box<Item>>>,
-        done: &Receiver<()>,
-    ) {
+    fn collect(&self, send_rx: &Receiver<Item>, out: &Sender<Vec<Item>>, done: &Receiver<()>) {
         loop {
             let first = select! {
                 recv(done) -> _ => return,
@@ -743,7 +759,8 @@ impl Shared {
                     recv(timeout) -> _ => break,
                 }
             }
-            self.tm.observe_sleep(sleep::BATCH_WAIT, self.tm.since(fill_started));
+            self.tm
+                .observe_sleep(sleep::BATCH_WAIT, self.tm.since(fill_started));
             let ready = self.tm.now();
             select! {
                 recv(done) -> _ => return,
@@ -757,17 +774,18 @@ impl Shared {
         }
     }
 
-    fn send_batch(&self, step: Step, batch: Vec<Box<Item>>) {
+    fn send_batch(&self, step: Step, batch: Vec<Item>) {
         let prepare_started = self.tm.now();
         let ready = self.prepare_batch(batch);
         let prepare = self.tm.since(prepare_started);
         let mut send = Duration::ZERO;
         let files = ready.len();
         self.send_ready(step, ready, &mut send);
-        self.tm.step_batch(step.as_i16() as usize, files, prepare, send);
+        self.tm
+            .step_batch(step.as_i16() as usize, files, prepare, send);
     }
 
-    fn send_ready(&self, step: Step, mut ready: Vec<Box<Item>>, send: &mut Duration) {
+    fn send_ready(&self, step: Step, mut ready: Vec<Item>, send: &mut Duration) {
         if ready.is_empty() {
             return;
         }
@@ -805,7 +823,7 @@ impl Shared {
         }
     }
 
-    fn send_alone(&self, step: Step, item: Box<Item>, send: &mut Duration) {
+    fn send_alone(&self, step: Step, item: Item, send: &mut Duration) {
         let files: Vec<UploadFile> = item.file.iter().cloned().collect();
         let (result, _) = self.upload_timed(step, &files, send);
         match result {
@@ -822,7 +840,7 @@ impl Shared {
     /// Prepares every item of the batch, up to `prepare_concurrency` at a
     /// time, and returns the ones ready to upload in batch order. Once the run
     /// is cancelled no further item is started.
-    fn prepare_batch(&self, batch: Vec<Box<Item>>) -> Vec<Box<Item>> {
+    fn prepare_batch(&self, batch: Vec<Item>) -> Vec<Item> {
         let workers = self.cfg.prepare_concurrency.min(batch.len()).max(1);
         par::map(batch, workers, |item| {
             if self.is_cancelled() {
@@ -843,7 +861,12 @@ impl Shared {
     ) -> (Result<String, ApiError>, Duration) {
         let started = self.tm.now();
         let size: u64 = files.iter().map(|f| f.size).sum();
-        tracing::info!(step = step.as_i16(), files = files.len(), bytes = size, "uploading step batch");
+        tracing::info!(
+            step = step.as_i16(),
+            files = files.len(),
+            bytes = size,
+            "uploading step batch"
+        );
         let result = self.api.upload(step, files);
         let took = self.tm.since(started);
         *send += took;
@@ -869,7 +892,7 @@ impl Shared {
 
     /// The local checks before an upload. `None` when the item was resolved
     /// (blocked, rejected or already confirmed) without sending.
-    fn prepare(&self, mut item: Box<Item>) -> Option<Box<Item>> {
+    fn prepare(&self, mut item: Item) -> Option<Item> {
         let step = item.st.step;
         if self.cfg.max_sends > 0 && item.st.sends >= self.cfg.max_sends {
             item.st.status = RadStatus::Rejected;
@@ -994,7 +1017,7 @@ impl Shared {
         .map(|(code, detail)| (code.to_owned(), detail))
     }
 
-    fn block_value(&self, mut item: Box<Item>, code: &str, detail: &str) {
+    fn block_value(&self, mut item: Item, code: &str, detail: &str) {
         tracing::warn!(invoice = %item.st.invoice, code, "step 1 blocked by value validation");
         item.st.status = RadStatus::Blocked;
         item.st.last_detail =
@@ -1002,7 +1025,7 @@ impl Shared {
         self.finish(item, Category::Blocked);
     }
 
-    fn block_missing(&self, mut item: Box<Item>, diag: &str) {
+    fn block_missing(&self, mut item: Item, diag: &str) {
         let (invoice, step) = (item.st.invoice.clone(), item.st.step);
         item.st.last_detail = if step == Step::Cuv {
             format!(
@@ -1020,7 +1043,7 @@ impl Shared {
     }
 
     /// The batch was uploaded: record it and schedule the first poll.
-    fn sent(&self, mut item: Box<Item>, id: &str, batch_size: usize, uploaded_at: Instant) {
+    fn sent(&self, mut item: Item, id: &str, batch_size: usize, uploaded_at: Instant) {
         let step = item.st.step;
         item.sent_tick = Some(uploaded_at);
         item.send_errors = 0;
@@ -1037,7 +1060,12 @@ impl Shared {
         self.save(&mut item);
         tracing::info!(invoice = %item.st.invoice, step = step.as_i16(), id_cargue = %id, batch = batch_size, "step uploaded");
         let invoice = item.st.invoice.clone();
-        self.push(Queue::Confirm(step), item, self.cfg.first_poll_delay, sleep::FIRST_POLL);
+        self.push(
+            Queue::Confirm(step),
+            item,
+            self.cfg.first_poll_delay,
+            sleep::FIRST_POLL,
+        );
         self.notify_uploaded(&invoice, step);
     }
 
@@ -1050,14 +1078,22 @@ impl Shared {
         }
     }
 
-    fn send_failed(&self, mut item: Box<Item>, err: &ApiError) {
+    fn send_failed(&self, mut item: Item, err: &ApiError) {
         let step = item.st.step;
         self.tm.resend(step.as_i16() as usize, "send_error");
         item.send_errors += 1;
         item.st.sends += 1;
-        let delay = backoff(self.cfg.quick_retry_delay, item.send_errors, self.cfg.retry_interval);
+        let delay = backoff(
+            self.cfg.quick_retry_delay,
+            item.send_errors,
+            self.cfg.retry_interval,
+        );
         item.st.status = RadStatus::Pending;
-        item.st.last_detail = format!("paso={} Fallo el envio {}: {err}", step.as_i16(), step.label());
+        item.st.last_detail = format!(
+            "paso={} Fallo el envio {}: {err}",
+            step.as_i16(),
+            step.label()
+        );
         item.st.next_attempt_at = Some(self.now() + chrono_delay(delay));
         self.save(&mut item);
         tracing::warn!(invoice = %item.st.invoice, step = step.as_i16(), retry_in_s = delay.as_secs(), error = %err, "upload failed");
@@ -1093,7 +1129,7 @@ impl Shared {
         EvidenceQuery::new(self, item, true).gather(self.api.as_ref())
     }
 
-    fn confirm(&self, item: Box<Item>) {
+    fn confirm(&self, item: Item) {
         match self.evidence(&item) {
             Err(err) => {
                 if self.is_cancelled() {
@@ -1111,7 +1147,7 @@ impl Shared {
     }
 
     /// Moves the item according to a verdict.
-    fn apply(&self, item: Box<Item>, verdict: Verdict, load: Option<Load>) {
+    fn apply(&self, item: Item, verdict: Verdict, load: Option<Load>) {
         match verdict.outcome {
             Outcome::Confirmed => self.confirmed(item, &verdict),
             Outcome::Pending => self.pending_poll(item, verdict, load),
@@ -1121,13 +1157,13 @@ impl Shared {
         }
     }
 
-    fn leave(&self, mut item: Box<Item>, status: RadStatus, verdict: &Verdict) {
+    fn leave(&self, mut item: Item, status: RadStatus, verdict: &Verdict) {
         item.st.status = status;
         item.st.last_detail = verdict.detail.clone();
         self.finish(item, Category::Rejected);
     }
 
-    fn pending_poll(&self, mut item: Box<Item>, mut verdict: Verdict, load: Option<Load>) {
+    fn pending_poll(&self, mut item: Item, mut verdict: Verdict, load: Option<Load>) {
         let step = item.st.step;
         item.st.polls += 1;
         if !verdict.detail.is_empty() {
@@ -1154,7 +1190,11 @@ impl Shared {
             self.push(Queue::Send(step), item, Duration::ZERO, sleep::POLL);
             return;
         }
-        let delay = backoff(self.cfg.poll_interval, item.st.polls as u32, self.cfg.poll_max_interval);
+        let delay = backoff(
+            self.cfg.poll_interval,
+            item.st.polls as u32,
+            self.cfg.poll_max_interval,
+        );
         item.st.next_attempt_at = Some(self.now() + chrono_delay(delay));
         self.save(&mut item);
         let queue = if item.st.status == RadStatus::Sent {
@@ -1165,7 +1205,7 @@ impl Shared {
         self.push(queue, item, delay, sleep::POLL);
     }
 
-    fn failed(&self, mut item: Box<Item>, verdict: &Verdict) {
+    fn failed(&self, mut item: Item, verdict: &Verdict) {
         let (step, invoice) = (item.st.step, item.st.invoice.clone());
         let text = format!("{} {}", verdict.detail, verdict.message);
         if step == Step::Cuv
@@ -1186,7 +1226,12 @@ impl Shared {
             item.sent_tick = None;
             self.tm.resend(step.as_i16() as usize, "step2_reload");
             self.save(&mut item);
-            self.push(Queue::Send(Step::InvoiceZip), item, Duration::ZERO, sleep::RESEND);
+            self.push(
+                Queue::Send(Step::InvoiceZip),
+                item,
+                Duration::ZERO,
+                sleep::RESEND,
+            );
             return;
         }
         let quick = retryable_upload_message(step, &verdict.message)
@@ -1207,11 +1252,15 @@ impl Shared {
         self.push(Queue::Send(step), item, delay, sleep::RESEND);
     }
 
-    fn confirmed(&self, mut item: Box<Item>, verdict: &Verdict) {
+    fn confirmed(&self, mut item: Item, verdict: &Verdict) {
         let step = item.st.step;
         if let Some(sent) = item.sent_tick.take() {
             // Only uploads made (and confirmed) in this run.
-            self.tm.confirmed(step.as_i16() as usize, self.tm.since(sent), item.st.polls as u64 + 1);
+            self.tm.confirmed(
+                step.as_i16() as usize,
+                self.tm.since(sent),
+                item.st.polls as u64 + 1,
+            );
         }
         self.archive(&item);
         tracing::info!(invoice = %item.st.invoice, step = step.as_i16(), id_cargue = %item.st.upload_id, "step confirmed");
@@ -1241,7 +1290,7 @@ impl Shared {
         }
     }
 
-    fn advance(&self, mut item: Box<Item>, delay: Duration) {
+    fn advance(&self, mut item: Item, delay: Duration) {
         let Some(next) = item.st.step.next() else {
             item.st.status = RadStatus::Confirmed;
             self.finish(item, Category::Done);
@@ -1341,7 +1390,11 @@ impl EvidenceQuery {
             }
             Step::Rips | Step::Crc => {
                 ev.filters = api.filters_all(&self.invoice)?;
-                let file_id = ev.filters.as_ref().map(|f| f.file_id.clone()).unwrap_or_default();
+                let file_id = ev
+                    .filters
+                    .as_ref()
+                    .map(|f| f.file_id.clone())
+                    .unwrap_or_default();
                 if self.step == Step::Rips
                     && !file_id.is_empty()
                     && evaluate(self.step, &ev).outcome == Outcome::AdjustmentNote

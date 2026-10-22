@@ -234,7 +234,8 @@ impl ArtifactFiles {
                 n.contains(invoice) && n.ends_with(".TXT")
             })
             .collect();
-        candidates.sort_by(|a, b| (txt_priority(&a.name), &a.rel).cmp(&(txt_priority(&b.name), &b.rel)));
+        candidates
+            .sort_by(|a, b| (txt_priority(&a.name), &a.rel).cmp(&(txt_priority(&b.name), &b.rel)));
         if candidates.is_empty() {
             return Ok(Found::Missing("TXT=FALTA".into()));
         }
@@ -279,11 +280,7 @@ fn classify(
         return None;
     }
     let in_archive = has_segment(&parts, ARCHIVE_DIR);
-    let rank = if in_archive {
-        0
-    } else {
-        dir_rank(&parts)?
-    };
+    let rank = if in_archive { 0 } else { dir_rank(&parts)? };
     let _ = nit;
     Some(Entry {
         rel: rel.to_owned(),
@@ -396,7 +393,9 @@ pub fn zip_xml_total(path: &std::path::Path) -> Option<(String, String)> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
     for i in 0..archive.len() {
-        let Ok(entry) = archive.by_index(i) else { continue };
+        let Ok(entry) = archive.by_index(i) else {
+            continue;
+        };
         let is_xml = entry
             .name()
             .is_ok_and(|name| name.to_lowercase().ends_with(".xml"));
@@ -404,13 +403,18 @@ pub fn zip_xml_total(path: &std::path::Path) -> Option<(String, String)> {
             continue;
         }
         let mut content = Vec::new();
-        if entry.take(MAX_XML_ENTRY + 1).read_to_end(&mut content).is_err()
+        if entry
+            .take(MAX_XML_ENTRY + 1)
+            .read_to_end(&mut content)
+            .is_err()
             || content.len() as u64 > MAX_XML_ENTRY
         {
             continue;
         }
         let text = String::from_utf8_lossy(&content);
-        let Some(cdata) = CDATA_RE.captures(&text) else { continue };
+        let Some(cdata) = CDATA_RE.captures(&text) else {
+            continue;
+        };
         for (tag, re) in AMOUNT_RES.iter() {
             if let Some(found) = re.captures(&cdata[1]) {
                 return Some((found[1].replace(',', ""), (*tag).to_owned()));
@@ -479,12 +483,25 @@ mod tests {
 
     #[test]
     fn xml_total_reads_payable_then_tax_inclusive_without_commas() {
-        let payable = totals("<cbc:PayableAmount currencyID=\"COP\"> 1,234,567.50 </cbc:PayableAmount>");
-        assert_eq!(total_of(&payable), Some(("1234567.50".into(), "PayableAmount".into())));
-        let tax = totals("<cbc:TaxInclusiveAmount currencyID=\"COP\">900.00</cbc:TaxInclusiveAmount>");
-        assert_eq!(total_of(&tax), Some(("900.00".into(), "TaxInclusiveAmount".into())));
-        let both = totals("<cbc:TaxInclusiveAmount>5.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>7.00</cbc:PayableAmount>");
-        assert_eq!(total_of(&both), Some(("7.00".into(), "PayableAmount".into())));
+        let payable =
+            totals("<cbc:PayableAmount currencyID=\"COP\"> 1,234,567.50 </cbc:PayableAmount>");
+        assert_eq!(
+            total_of(&payable),
+            Some(("1234567.50".into(), "PayableAmount".into()))
+        );
+        let tax =
+            totals("<cbc:TaxInclusiveAmount currencyID=\"COP\">900.00</cbc:TaxInclusiveAmount>");
+        assert_eq!(
+            total_of(&tax),
+            Some(("900.00".into(), "TaxInclusiveAmount".into()))
+        );
+        let both = totals(
+            "<cbc:TaxInclusiveAmount>5.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>7.00</cbc:PayableAmount>",
+        );
+        assert_eq!(
+            total_of(&both),
+            Some(("7.00".into(), "PayableAmount".into()))
+        );
         assert_eq!(total_of(&zip_with_invoice("<Invoice/>")), None);
         assert_eq!(total_of(b"not a zip"), None);
     }
@@ -511,7 +528,13 @@ mod tests {
         let workdir = Workdir::create(ctx_root.path(), CARGUE).expect("workdir");
         let files = ArtifactFiles::load(artifacts.clone(), archive.clone(), workdir, CARGUE, NIT)
             .expect("load");
-        Fixture { _db: db, files, artifacts, archive, ctx_root }
+        Fixture {
+            _db: db,
+            files,
+            artifacts,
+            archive,
+            ctx_root,
+        }
     }
 
     fn file(found: Found) -> UploadFile {
@@ -539,24 +562,59 @@ mod tests {
             ("derechos/FEV1.json", b"{\"not\":\"rips\"}"),
         ]);
         assert_eq!(fx.files.invoices(), ["FEV1"]);
-        let zip = file(fx.files.find(Step::InvoiceZip, "fev-1", false).expect("find"));
-        assert_eq!((zip.rel.as_str(), zip.name.as_str(), zip.size), ("XML/FEV1_XML_PDF.zip", "FEV1_XML_PDF.zip", 3));
+        let zip = file(
+            fx.files
+                .find(Step::InvoiceZip, "fev-1", false)
+                .expect("find"),
+        );
+        assert_eq!(
+            (zip.rel.as_str(), zip.name.as_str(), zip.size),
+            ("XML/FEV1_XML_PDF.zip", "FEV1_XML_PDF.zip", 3)
+        );
         assert_eq!(std::fs::read(&zip.path).expect("read"), b"zip");
         assert!(zip.path.starts_with(fx.files.workdir().path()));
-        assert_eq!(file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel, "FEV1.txt");
+        assert_eq!(
+            file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel,
+            "FEV1.txt"
+        );
         let rips = file(fx.files.find(Step::Rips, "FEV1", false).expect("find"));
-        assert_eq!(rips.rel, "FEV1.json", "a JSON in a non-indexed folder is never the RIPS");
-        assert_eq!(file(fx.files.find(Step::Crc, "FEV1", false).expect("find")).rel, "CRC/CRC_900111222_FEV1.zip");
+        assert_eq!(
+            rips.rel, "FEV1.json",
+            "a JSON in a non-indexed folder is never the RIPS"
+        );
+        assert_eq!(
+            file(fx.files.find(Step::Crc, "FEV1", false).expect("find")).rel,
+            "CRC/CRC_900111222_FEV1.zip"
+        );
         assert!(fx.ctx_root.path().exists());
     }
 
     #[test]
     fn misses_explain_themselves_in_spanish() {
-        let fx = fixture(&[("XML/FEV1_XML_PDF.zip", b""), ("CRC/CRC_111_FEV1.zip", b"x")]);
-        assert_eq!(missing(fx.files.find(Step::InvoiceZip, "FEV1", false).expect("find")), "el archivo FEV1_XML_PDF.zip esta vacio");
-        assert_eq!(missing(fx.files.find(Step::Rips, "FEV1", false).expect("find")), "no se encontro archivo JSON para factura FEV1");
-        assert_eq!(missing(fx.files.find(Step::Crc, "FEV1", false).expect("find")), "no se encontro archivo ZIP CRC para factura FEV1");
-        assert_eq!(missing(fx.files.find(Step::Cuv, "FEV1", false).expect("find")), "TXT=FALTA");
+        let fx = fixture(&[
+            ("XML/FEV1_XML_PDF.zip", b""),
+            ("CRC/CRC_111_FEV1.zip", b"x"),
+        ]);
+        assert_eq!(
+            missing(
+                fx.files
+                    .find(Step::InvoiceZip, "FEV1", false)
+                    .expect("find")
+            ),
+            "el archivo FEV1_XML_PDF.zip esta vacio"
+        );
+        assert_eq!(
+            missing(fx.files.find(Step::Rips, "FEV1", false).expect("find")),
+            "no se encontro archivo JSON para factura FEV1"
+        );
+        assert_eq!(
+            missing(fx.files.find(Step::Crc, "FEV1", false).expect("find")),
+            "no se encontro archivo ZIP CRC para factura FEV1"
+        );
+        assert_eq!(
+            missing(fx.files.find(Step::Cuv, "FEV1", false).expect("find")),
+            "TXT=FALTA"
+        );
     }
 
     #[test]
@@ -566,7 +624,10 @@ mod tests {
             ("FEV1_ERROR.txt", b"{\"CUV\":\"abc\"}"),
             ("lote_1/FEV1.txt", b"{\"CodigoUnicoValidacion\":\"zzz\"}"),
         ]);
-        assert_eq!(file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel, "lote_1/FEV1.txt");
+        assert_eq!(
+            file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel,
+            "lote_1/FEV1.txt"
+        );
         let bad = fixture(&[("FEV1.txt", b"{\"CUV\":\"-\"}"), ("FEV1_ERROR.txt", b"{}")]);
         assert_eq!(
             missing(bad.files.find(Step::Cuv, "FEV1", false).expect("find")),
@@ -584,10 +645,31 @@ mod tests {
             ("Radicado/XML/FEV6_XML_PDF.zip", b"z"),
         ]);
         assert_eq!(fx.files.invoices(), ["FEV2", "FEV3"]);
-        assert_eq!(file(fx.files.find(Step::InvoiceZip, "FEV2", false).expect("find")).rel, "lote_2/ZIP/FEV2_XML_PDF.zip");
-        assert!(matches!(fx.files.find(Step::InvoiceZip, "FEV4", false).expect("find"), Found::Missing(_)));
-        assert!(matches!(fx.files.find(Step::InvoiceZip, "FEV5", true).expect("find"), Found::Missing(_)));
-        assert!(matches!(fx.files.find(Step::InvoiceZip, "FEV6", false).expect("find"), Found::Missing(_)));
+        assert_eq!(
+            file(
+                fx.files
+                    .find(Step::InvoiceZip, "FEV2", false)
+                    .expect("find")
+            )
+            .rel,
+            "lote_2/ZIP/FEV2_XML_PDF.zip"
+        );
+        assert!(matches!(
+            fx.files
+                .find(Step::InvoiceZip, "FEV4", false)
+                .expect("find"),
+            Found::Missing(_)
+        ));
+        assert!(matches!(
+            fx.files.find(Step::InvoiceZip, "FEV5", true).expect("find"),
+            Found::Missing(_)
+        ));
+        assert!(matches!(
+            fx.files
+                .find(Step::InvoiceZip, "FEV6", false)
+                .expect("find"),
+            Found::Missing(_)
+        ));
         assert_eq!(
             file(fx.files.find(Step::InvoiceZip, "FEV6", true).expect("find")).rel,
             "Radicado/XML/FEV6_XML_PDF.zip"
@@ -597,22 +679,43 @@ mod tests {
     #[test]
     fn archiving_hides_a_file_until_it_is_asked_for_or_regenerated() {
         let fx = fixture(&[("XML/FEV1_XML_PDF.zip", b"v1")]);
-        let zip = file(fx.files.find(Step::InvoiceZip, "FEV1", false).expect("find"));
+        let zip = file(
+            fx.files
+                .find(Step::InvoiceZip, "FEV1", false)
+                .expect("find"),
+        );
         fx.files.archive(&zip).expect("archive");
         fx.files.archive(&zip).expect("archive twice is fine");
         assert!(fx.files.invoices().is_empty());
-        assert!(matches!(fx.files.find(Step::InvoiceZip, "FEV1", false).expect("find"), Found::Missing(_)));
-        assert_eq!(file(fx.files.find(Step::InvoiceZip, "FEV1", true).expect("find")).rel, zip.rel);
+        assert!(matches!(
+            fx.files
+                .find(Step::InvoiceZip, "FEV1", false)
+                .expect("find"),
+            Found::Missing(_)
+        ));
+        assert_eq!(
+            file(fx.files.find(Step::InvoiceZip, "FEV1", true).expect("find")).rel,
+            zip.rel
+        );
         let marks = fx.archive.list(CARGUE).expect("marks");
         assert_eq!(marks.len(), 1);
 
         // A new run sees the marker; a regenerated artifact is a new, unfiled file.
         let reload = |fx: &Fixture| {
             let workdir = Workdir::create(fx.ctx_root.path(), CARGUE).expect("workdir");
-            ArtifactFiles::load(fx.artifacts.clone(), fx.archive.clone(), workdir, CARGUE, NIT).expect("load")
+            ArtifactFiles::load(
+                fx.artifacts.clone(),
+                fx.archive.clone(),
+                workdir,
+                CARGUE,
+                NIT,
+            )
+            .expect("load")
         };
         assert!(reload(&fx).invoices().is_empty());
-        fx.artifacts.publish_bytes(CARGUE, "XML/FEV1_XML_PDF.zip", b"v2").expect("republish");
+        fx.artifacts
+            .publish_bytes(CARGUE, "XML/FEV1_XML_PDF.zip", b"v2")
+            .expect("republish");
         assert_eq!(reload(&fx).invoices(), ["FEV1"]);
     }
 
@@ -621,6 +724,9 @@ mod tests {
         let fx = fixture(&[("FEV1.txt", b"{\"CUV\":\"abc\"}")]);
         let txt = file(fx.files.find(Step::Cuv, "FEV1", false).expect("find"));
         fx.files.archive(&txt).expect("archive");
-        assert_eq!(file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel, "FEV1.txt");
+        assert_eq!(
+            file(fx.files.find(Step::Cuv, "FEV1", false).expect("find")).rel,
+            "FEV1.txt"
+        );
     }
 }

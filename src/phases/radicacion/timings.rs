@@ -259,7 +259,9 @@ impl Timings {
 
     /// An invoice of `step` was sent again, with a short reason.
     pub fn resend(&self, step: usize, reason: &str) {
-        self.with_step(step, |s| *s.resends.entry(reason.to_owned()).or_default() += 1);
+        self.with_step(step, |s| {
+            *s.resends.entry(reason.to_owned()).or_default() += 1
+        });
     }
 
     /// A render-ready copy of the figures so far.
@@ -744,7 +746,12 @@ impl Snapshot {
         let api: Vec<String> = self
             .ops
             .iter()
-            .map(|o| format!("{}[calls={} errors={} avg_ms={}]", o.op, o.calls, o.errors, o.avg_ms))
+            .map(|o| {
+                format!(
+                    "{}[calls={} errors={} avg_ms={}]",
+                    o.op, o.calls, o.errors, o.avg_ms
+                )
+            })
             .collect();
         tracing::info!(
             wall_ms = self.wall_ms,
@@ -833,13 +840,25 @@ mod tests {
         let step = &snap.steps[0];
         assert_eq!((step.step, step.batches, step.files), (1, 1, 200));
         assert_eq!((step.prepare_ms, step.send_ms), (5000.0, 95000.0));
-        assert_eq!((step.confirmed, step.polls_avg, step.polls_max), (2, 3.5, 4));
-        assert_eq!((step.latency_p50_ms, step.latency_max_ms), (40000.0, 60000.0));
+        assert_eq!(
+            (step.confirmed, step.polls_avg, step.polls_max),
+            (2, 3.5, 4)
+        );
+        assert_eq!(
+            (step.latency_p50_ms, step.latency_max_ms),
+            (40000.0, 60000.0)
+        );
         assert_eq!(step.resends_total, 2);
         let op = &snap.ops[0];
         assert_eq!((op.calls, op.errors, op.retried), (2, 1, 1));
-        assert_eq!((op.avg_ms, op.limiter_wait_ms, op.retry_wait_ms), (400.0, 30.0, 100.0));
-        assert_eq!((snap.limiter.min_concurrency, snap.limiter.max_concurrency), (20, 23));
+        assert_eq!(
+            (op.avg_ms, op.limiter_wait_ms, op.retry_wait_ms),
+            (400.0, 30.0, 100.0)
+        );
+        assert_eq!(
+            (snap.limiter.min_concurrency, snap.limiter.max_concurrency),
+            (20, 23)
+        );
         assert_eq!(snap.sleeps.len(), 1);
         assert_eq!(snap.sleeps[0].count, 1);
         let names: Vec<&str> = snap.sinks.iter().map(|s| s.name.as_str()).collect();
@@ -865,7 +884,10 @@ mod tests {
         tm.resend(2, "quick_retry");
         *now.lock().unwrap() += Duration::from_secs(432);
         let text = tm.snapshot().text();
-        assert!(text.starts_with("Tiempos de radicación\nDuración total (reloj): 7m12s\nNota: "), "{text}");
+        assert!(
+            text.starts_with("Tiempos de radicación\nDuración total (reloj): 7m12s\nNota: "),
+            "{text}"
+        );
         assert!(text.contains("Por paso (latencia = desde el envío hasta la confirmación"));
         assert!(text.contains("PASO  LOTES  ARCHIVOS  PREP(s)  ENVÍO(s)  CONFIRMADAS  ENV→CONF p50(s)  p95(s)  máx(s)  SONDEOS/FACT  REENVÍOS"));
         assert!(text.contains("2     1      3         2.0      40.0      0            0.0              0.0     0.0     0.0           quick_retry=1"), "{text}");
@@ -885,7 +907,20 @@ mod tests {
             "Tiempos de radicación\nDuración total (reloj): 0s\n(sin actividad medida)\n"
         );
         let json: serde_json::Value = serde_json::from_slice(&snap.json().unwrap()).unwrap();
-        for key in ["version", "generatedAt", "wallMs", "accumMs", "steps", "ops", "limiter", "db", "files", "sleeps", "queues", "sinks"] {
+        for key in [
+            "version",
+            "generatedAt",
+            "wallMs",
+            "accumMs",
+            "steps",
+            "ops",
+            "limiter",
+            "db",
+            "files",
+            "sleeps",
+            "queues",
+            "sinks",
+        ] {
             assert!(json.get(key).is_some(), "missing {key}");
         }
         assert_eq!(json["version"], 1);

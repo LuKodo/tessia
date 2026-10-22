@@ -66,7 +66,9 @@ mod tests {
     fn marks_are_listed_per_cargue_and_replaced_on_remark() {
         let db = TestDb::new();
         let store = ArchiveStore::new(db.pool());
-        store.mark("C1", "XML/FEV1_XML_PDF.zip", "aaa").expect("mark");
+        store
+            .mark("C1", "XML/FEV1_XML_PDF.zip", "aaa")
+            .expect("mark");
         store.mark("C1", "FEV1.txt", "bbb").expect("mark");
         store.mark("C2", "FEV1.txt", "ccc").expect("mark");
         store.mark("C1", "FEV1.txt", "ddd").expect("remark");

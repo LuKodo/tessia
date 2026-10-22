@@ -90,7 +90,11 @@ impl Load {
     }
 }
 
-fn lookup_file(load: Option<&Load>, matches: &dyn Fn(&str) -> bool, require_no_errors: bool) -> FileStatus {
+fn lookup_file(
+    load: Option<&Load>,
+    matches: &dyn Fn(&str) -> bool,
+    require_no_errors: bool,
+) -> FileStatus {
     let mut status = FileStatus::default();
     let Some(load) = load else { return status };
     for file in &load.files {
@@ -116,11 +120,16 @@ fn file_message(file: &LoadFile) -> String {
         .iter()
         .find(|m| m.kind.eq_ignore_ascii_case("ERROR") && !m.description.is_empty());
     let any = || file.messages.iter().find(|m| !m.description.is_empty());
-    error.or_else(any).map(|m| m.description.clone()).unwrap_or_default()
+    error
+        .or_else(any)
+        .map(|m| m.description.clone())
+        .unwrap_or_default()
 }
 
 /// The matcher and display name of the step file in `findLoad`.
-fn expected_name(step: Step, invoice: &str, nit: &str) -> (Box<dyn Fn(&str) -> bool>, String) {
+type Matcher = Box<dyn Fn(&str) -> bool>;
+
+fn expected_name(step: Step, invoice: &str, nit: &str) -> (Matcher, String) {
     let inv = invoice.to_uppercase();
     match step {
         Step::InvoiceZip => (
@@ -183,7 +192,8 @@ impl Detail {
 
     fn add_filters(&mut self, item: Option<&FiltersAllItem>) {
         let Some(item) = item else {
-            self.add("encontrado", false).add("documento_soporte", "null");
+            self.add("encontrado", false)
+                .add("documento_soporte", "null");
             return;
         };
         self.add("encontrado", true)
@@ -198,8 +208,15 @@ impl Detail {
             self.add("documento_soporte", "null");
             return;
         };
-        self.add("soporteActivo", support.status.eq_ignore_ascii_case("ACTIVE"));
-        let raw = if support.raw.is_empty() { "{}" } else { &support.raw };
+        self.add(
+            "soporteActivo",
+            support.status.eq_ignore_ascii_case("ACTIVE"),
+        );
+        let raw = if support.raw.is_empty() {
+            "{}"
+        } else {
+            &support.raw
+        };
         self.add("documento_soporte", raw);
     }
 }
@@ -360,7 +377,9 @@ fn evaluate_rips(ev: &Evidence) -> Verdict {
         Some(item) if item.returned || rejected_status(&item.status) || !item.services_valid => {
             verdict.outcome = Outcome::AdjustmentNote;
             verdict.file_loaded = true;
-            detail.add("jsonValido", false).add("requiereNotaAjuste", true);
+            detail
+                .add("jsonValido", false)
+                .add("requiereNotaAjuste", true);
             detail.add("findDetailsByFile", findings_text(&ev.details));
         }
         Some(item) => {
@@ -396,7 +415,11 @@ fn findings_text(details: &[FileDetail]) -> String {
             one_line(&f.detail)
         ));
     }
-    format!("total={} novedades=[{}]", details.len(), findings.join(" || "))
+    format!(
+        "total={} novedades=[{}]",
+        details.len(),
+        findings.join(" || ")
+    )
 }
 
 fn evaluate_crc(ev: &Evidence) -> Verdict {
@@ -419,9 +442,9 @@ fn evaluate_crc(ev: &Evidence) -> Verdict {
     verdict.outcome = if active {
         verdict.file_loaded = true;
         Outcome::Confirmed
-    } else if support_already_associated(&status.message) {
-        Outcome::AdjustmentNote
-    } else if !loaded && crc_adjustment_note(&upload_detail) {
+    } else if support_already_associated(&status.message)
+        || (!loaded && crc_adjustment_note(&upload_detail))
+    {
         Outcome::AdjustmentNote
     } else if finished && status.found && !status.loaded {
         Outcome::Failed
@@ -488,8 +511,24 @@ mod tests {
     fn step1_outcomes() {
         let cases: Vec<(&str, Evidence, Outcome, &str)> = vec![
             ("no upload id", evidence(None, ""), Outcome::Pending, ""),
-            ("processing", evidence(load("EN_PROCESO", vec![]), "id-1"), Outcome::Pending, ""),
-            ("loaded", evidence(load("TERMINADO", vec![file("FEV1_XML_PDF.zip", "CARGADO", vec![])]), "id-1"), Outcome::Confirmed, ""),
+            (
+                "processing",
+                evidence(load("EN_PROCESO", vec![]), "id-1"),
+                Outcome::Pending,
+                "",
+            ),
+            (
+                "loaded",
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file("FEV1_XML_PDF.zip", "CARGADO", vec![])],
+                    ),
+                    "id-1",
+                ),
+                Outcome::Confirmed,
+                "",
+            ),
             (
                 "loaded among others",
                 evidence(
@@ -507,26 +546,70 @@ mod tests {
             ),
             (
                 "file error",
-                evidence(load("TERMINADO", vec![file("FEV1_XML_PDF.zip", "ERROR", vec![err("E1", "La estructura del XML no cumple")])]), "id-1"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            "FEV1_XML_PDF.zip",
+                            "ERROR",
+                            vec![err("E1", "La estructura del XML no cumple")],
+                        )],
+                    ),
+                    "id-1",
+                ),
                 Outcome::Failed,
                 "La estructura del XML no cumple",
             ),
             (
                 "loaded with error codes",
-                evidence(load("TERMINADO", vec![file("FEV1_XML_PDF.zip", "CARGADO", vec![err("E1", "bad")])]), "id-1"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file("FEV1_XML_PDF.zip", "CARGADO", vec![err("E1", "bad")])],
+                    ),
+                    "id-1",
+                ),
                 Outcome::Failed,
                 "bad",
             ),
             (
                 "already validated",
-                evidence(load("TERMINADO", vec![file("FEV1_XML_PDF.zip", "ERROR", vec![err("E", "ya se encuentra en estado VALIDADO")])]), "id-1"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            "FEV1_XML_PDF.zip",
+                            "ERROR",
+                            vec![err("E", "ya se encuentra en estado VALIDADO")],
+                        )],
+                    ),
+                    "id-1",
+                ),
                 Outcome::Confirmed,
                 "",
             ),
-            ("missing file", evidence(load("TERMINADO", vec![]), "id-1"), Outcome::Failed, "archivo no presente"),
+            (
+                "missing file",
+                evidence(load("TERMINADO", vec![]), "id-1"),
+                Outcome::Failed,
+                "archivo no presente",
+            ),
             (
                 "rejected invoice",
-                evidence(load("TERMINADO", vec![file("FEV1_XML_PDF.zip", "ERROR", vec![err("E", "La factura asociada se encuentra en estado RECHAZADA")])]), "id-1"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            "FEV1_XML_PDF.zip",
+                            "ERROR",
+                            vec![err(
+                                "E",
+                                "La factura asociada se encuentra en estado RECHAZADA",
+                            )],
+                        )],
+                    ),
+                    "id-1",
+                ),
                 Outcome::CreditNote,
                 "",
             ),
@@ -534,8 +617,16 @@ mod tests {
         for (name, ev, want, message) in cases {
             let verdict = evaluate(Step::InvoiceZip, &ev);
             assert_eq!(verdict.outcome, want, "{name}: {}", verdict.detail);
-            assert!(verdict.message.contains(message), "{name}: {}", verdict.message);
-            assert!(verdict.detail.starts_with("paso=1 "), "{name}: {}", verdict.detail);
+            assert!(
+                verdict.message.contains(message),
+                "{name}: {}",
+                verdict.message
+            );
+            assert!(
+                verdict.detail.starts_with("paso=1 "),
+                "{name}: {}",
+                verdict.detail
+            );
         }
     }
 
@@ -566,22 +657,71 @@ mod tests {
         let mut cases: Vec<(&str, Evidence, Outcome)> = vec![
             (
                 "already associated alone is enough",
-                evidence(load("EN_PROCESO", vec![file("FEV1.txt", "ERROR", vec![associated("RF-FE-013", "CUV ya asociado a FEV-1")])]), "id-2"),
+                evidence(
+                    load(
+                        "EN_PROCESO",
+                        vec![file(
+                            "FEV1.txt",
+                            "ERROR",
+                            vec![associated("RF-FE-013", "CUV ya asociado a FEV-1")],
+                        )],
+                    ),
+                    "id-2",
+                ),
                 Outcome::Confirmed,
             ),
             (
                 "associated message of other invoice",
-                evidence(load("TERMINADO", vec![file("FEV1.txt", "ERROR", vec![associated("RF-FE-013", "asociado a FEV9")])]), "id-2"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            "FEV1.txt",
+                            "ERROR",
+                            vec![associated("RF-FE-013", "asociado a FEV9")],
+                        )],
+                    ),
+                    "id-2",
+                ),
                 Outcome::Failed,
             ),
-            ("loaded + xml active", evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"), Outcome::Confirmed),
-            ("loaded, xml lagging", evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"), Outcome::Pending),
-            ("loaded, xml missing", evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"), Outcome::Pending),
-            ("xml statusType 3 is a rejection", evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"), Outcome::CreditNote),
-            ("processing", evidence(load("EN_PROCESO", txt("CARGADO", vec![])), "id-2"), Outcome::Pending),
+            (
+                "loaded + xml active",
+                evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"),
+                Outcome::Confirmed,
+            ),
+            (
+                "loaded, xml lagging",
+                evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"),
+                Outcome::Pending,
+            ),
+            (
+                "loaded, xml missing",
+                evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"),
+                Outcome::Pending,
+            ),
+            (
+                "xml statusType 3 is a rejection",
+                evidence(load("TERMINADO", txt("CARGADO", vec![])), "id-2"),
+                Outcome::CreditNote,
+            ),
+            (
+                "processing",
+                evidence(load("EN_PROCESO", txt("CARGADO", vec![])), "id-2"),
+                Outcome::Pending,
+            ),
             (
                 "error",
-                evidence(load("TERMINADO", txt("ERROR", vec![err("RF-FE-012", "no cuenta con una factura electrónica")])), "id-2"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        txt(
+                            "ERROR",
+                            vec![err("RF-FE-012", "no cuenta con una factura electrónica")],
+                        ),
+                    ),
+                    "id-2",
+                ),
                 Outcome::Failed,
             ),
         ];
@@ -592,8 +732,16 @@ mod tests {
             let verdict = evaluate(Step::Cuv, &ev);
             assert_eq!(verdict.outcome, want, "{name}: {}", verdict.detail);
         }
-        let ev = evidence(load("TERMINADO", txt("ERROR", vec![err("RF-FE-012", "sin factura")])), "id");
-        assert!(super::super::rules::requires_step1_reload(&evaluate(Step::Cuv, &ev).detail));
+        let ev = evidence(
+            load(
+                "TERMINADO",
+                txt("ERROR", vec![err("RF-FE-012", "sin factura")]),
+            ),
+            "id",
+        );
+        assert!(super::super::rules::requires_step1_reload(
+            &evaluate(Step::Cuv, &ev).detail
+        ));
     }
 
     #[test]
@@ -619,21 +767,61 @@ mod tests {
         };
         let cases = vec![
             ("not yet listed", with(None), Outcome::Pending, false),
-            ("valid, support pending", with(Some(ok)), Outcome::Confirmed, true),
-            ("valid, support associated", with(Some(item(false, "", true, true))), Outcome::Confirmed, false),
-            ("returned", with(Some(item(true, "", true, false))), Outcome::AdjustmentNote, false),
-            ("rejected status", with(Some(item(false, "RECHAZADO", true, false))), Outcome::AdjustmentNote, false),
-            ("no services", with(Some(item(false, "", false, false))), Outcome::AdjustmentNote, false),
+            (
+                "valid, support pending",
+                with(Some(ok)),
+                Outcome::Confirmed,
+                true,
+            ),
+            (
+                "valid, support associated",
+                with(Some(item(false, "", true, true))),
+                Outcome::Confirmed,
+                false,
+            ),
+            (
+                "returned",
+                with(Some(item(true, "", true, false))),
+                Outcome::AdjustmentNote,
+                false,
+            ),
+            (
+                "rejected status",
+                with(Some(item(false, "RECHAZADO", true, false))),
+                Outcome::AdjustmentNote,
+                false,
+            ),
+            (
+                "no services",
+                with(Some(item(false, "", false, false))),
+                Outcome::AdjustmentNote,
+                false,
+            ),
             (
                 "upload error",
-                evidence(load("TERMINADO", vec![file("FEV1.json", "ERROR", vec![err("E", "Señor usuario, para continuar")])]), "id"),
+                evidence(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            "FEV1.json",
+                            "ERROR",
+                            vec![err("E", "Señor usuario, para continuar")],
+                        )],
+                    ),
+                    "id",
+                ),
                 Outcome::Failed,
                 false,
             ),
         ];
         for (name, ev, want, pending) in cases {
             let verdict = evaluate(Step::Rips, &ev);
-            assert_eq!((verdict.outcome, verdict.support_pending), (want, pending), "{name}: {}", verdict.detail);
+            assert_eq!(
+                (verdict.outcome, verdict.support_pending),
+                (want, pending),
+                "{name}: {}",
+                verdict.detail
+            );
         }
         let mut ev = evidence(None, "");
         ev.filters = Some(item(true, "", false, false));
@@ -663,29 +851,85 @@ mod tests {
         };
         let loaded = || load("TERMINADO", vec![file(&crc, "CARGADO", vec![])]);
         let cases = vec![
-            ("support active", with(loaded(), "id", Some(support("ACTIVE"))), Outcome::Confirmed),
-            ("support active without upload id", with(None, "", Some(support("ACTIVE"))), Outcome::Confirmed),
-            ("loaded, support not yet active", with(loaded(), "id", Some(support("INACTIVE"))), Outcome::Pending),
-            ("processing", with(load("EN_PROCESO", vec![]), "id", None), Outcome::Pending),
+            (
+                "support active",
+                with(loaded(), "id", Some(support("ACTIVE"))),
+                Outcome::Confirmed,
+            ),
+            (
+                "support active without upload id",
+                with(None, "", Some(support("ACTIVE"))),
+                Outcome::Confirmed,
+            ),
+            (
+                "loaded, support not yet active",
+                with(loaded(), "id", Some(support("INACTIVE"))),
+                Outcome::Pending,
+            ),
+            (
+                "processing",
+                with(load("EN_PROCESO", vec![]), "id", None),
+                Outcome::Pending,
+            ),
             (
                 "not permitted",
-                with(load("TERMINADO", vec![file(&crc, "ERROR", vec![err("E", "No permitido: no tiene factura/cuv cargada")])]), "id", None),
+                with(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            &crc,
+                            "ERROR",
+                            vec![err("E", "No permitido: no tiene factura/cuv cargada")],
+                        )],
+                    ),
+                    "id",
+                    None,
+                ),
                 Outcome::AdjustmentNote,
             ),
             (
                 "support already associated",
-                with(load("TERMINADO", vec![file(&crc, "ERROR", vec![err("E", "La factura ya cuenta con un soporte asociado")])]), "id", None),
+                with(
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            &crc,
+                            "ERROR",
+                            vec![err("E", "La factura ya cuenta con un soporte asociado")],
+                        )],
+                    ),
+                    "id",
+                    None,
+                ),
                 Outcome::AdjustmentNote,
             ),
             (
                 "file in ERROR state is an adjustment (legacy rule)",
-                with(load("TERMINADO", vec![file(&crc, "ERROR", vec![err("E", "timeout")])]), "id", None),
+                with(
+                    load(
+                        "TERMINADO",
+                        vec![file(&crc, "ERROR", vec![err("E", "timeout")])],
+                    ),
+                    "id",
+                    None,
+                ),
                 Outcome::AdjustmentNote,
             ),
             (
                 "other failure is retried",
                 with(
-                    load("TERMINADO", vec![file(&crc, "FALLIDO", vec![Message { kind: "INFO".into(), description: "timeout".into(), ..Message::default() }])]),
+                    load(
+                        "TERMINADO",
+                        vec![file(
+                            &crc,
+                            "FALLIDO",
+                            vec![Message {
+                                kind: "INFO".into(),
+                                description: "timeout".into(),
+                                ..Message::default()
+                            }],
+                        )],
+                    ),
                     "id",
                     None,
                 ),
@@ -698,11 +942,17 @@ mod tests {
         }
         let confirmed = evaluate(Step::Crc, &with(None, "", Some(support("ACTIVE"))));
         assert!(
-            confirmed.detail.contains(r#"documento_soporte={"estado":"ACTIVE"}"#),
+            confirmed
+                .detail
+                .contains(r#"documento_soporte={"estado":"ACTIVE"}"#),
             "{}",
             confirmed.detail
         );
         let waiting = evaluate(Step::Crc, &with(load("EN_PROCESO", vec![]), "id", None));
-        assert!(waiting.detail.contains("documento_soporte=null"), "{}", waiting.detail);
+        assert!(
+            waiting.detail.contains("documento_soporte=null"),
+            "{}",
+            waiting.detail
+        );
     }
 }
