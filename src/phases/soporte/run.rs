@@ -12,7 +12,7 @@ use super::generator::{self, Request};
 use super::input::{Header, SoporteInput};
 use super::zipfile;
 use crate::context::AppContext;
-use crate::domain::{Outcome, Phase, PhaseState, valid_invoice};
+use crate::domain::{Outcome, Phase, PhaseState, normalize_invoice, valid_invoice};
 use crate::phases::common::{PhaseReport, PhaseRequest};
 use crate::shutdown;
 use crate::stores::proceso::{ClaimItem, ProcesoState};
@@ -154,7 +154,9 @@ fn select(req: &PhaseRequest, inputs: Vec<SoporteInput>) -> Result<Vec<SoporteIn
             by_invoice.insert(input.invoice.clone(), input);
         }
     }
-    let wanted = req.invoices.clone().unwrap_or(order);
+    let wanted: Vec<String> = req.invoices.as_ref().map_or(order, |names| {
+        names.iter().map(|n| normalize_invoice(n)).collect()
+    });
     wanted
         .into_iter()
         .map(|invoice| {

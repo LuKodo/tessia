@@ -141,7 +141,14 @@ pub fn manual_signature(ctx: &AppContext, header: &Header) -> Result<ManualSigna
         Some(_) if existing => {
             "firma generada sin guardar (el archivo existente no es valido y no se reemplaza)".to_owned()
         }
-        Some(file) => publish_new(ctx, &signature_rel(file), &png),
+        Some(file) => match publish_new(ctx, &signature_rel(file), &png) {
+            Published::Saved => String::new(),
+            // Another invoice of the same patient saved it meanwhile: use that file.
+            Published::Existing(saved) => {
+                return Ok(ManualSignature { png: saved, generated: false, note: String::new() });
+            }
+            Published::Failed(note) => note,
+        },
     };
     Ok(ManualSignature {
         png,
@@ -150,17 +157,34 @@ pub fn manual_signature(ctx: &AppContext, header: &Header) -> Result<ManualSigna
     })
 }
 
-/// Publishes a generated signature unless someone published one meanwhile;
-/// returns the note ("" when saved).
-fn publish_new(ctx: &AppContext, rel: &str, png: &[u8]) -> String {
+enum Published {
+    Saved,
+    /// Somebody published a valid file first.
+    Existing(Vec<u8>),
+    Failed(String),
+}
+
+/// Publishes a generated signature unless a file exists already (never
+/// overwrites). Two invoices of one patient may race here; both draw the same
+/// deterministic image, so the loser simply adopts the winner's file.
+fn publish_new(ctx: &AppContext, rel: &str, png: &[u8]) -> Published {
     let artifacts = ctx.artifacts();
+    let unsaved = |err: &dyn std::fmt::Display| {
+        Published::Failed(format!("firma generada sin guardar: {err}"))
+    };
     match artifacts.is_published(SHARED_CARGUE, rel) {
         Ok(false) => match artifacts.publish_bytes(SHARED_CARGUE, rel, png) {
-            Ok(_) => String::new(),
-            Err(err) => format!("firma generada sin guardar: {err:#}"),
+            Ok(_) => Published::Saved,
+            Err(err) => unsaved(&format!("{err:#}")),
         },
-        Ok(true) => "firma generada sin guardar (otra maquina la guardo antes)".to_owned(),
-        Err(err) => format!("firma generada sin guardar: {err:#}"),
+        Ok(true) => match artifacts.fetch_bytes(SHARED_CARGUE, rel) {
+            Ok(saved) if saved.len() >= MIN_SIGNATURE_BYTES => Published::Existing(saved),
+            _ => Published::Failed(
+                "firma generada sin guardar (el archivo existente no es valido y no se reemplaza)"
+                    .to_owned(),
+            ),
+        },
+        Err(err) => unsaved(&format!("{err:#}")),
     }
 }
 
