@@ -29,3 +29,8 @@ You work in your own git worktree under `/Users/adatospharma/Desktop/rust_versio
 
 ## Return (max ~60 lines)
 status; branch and commit hashes/subjects; behavior IDs from the catalog you covered / deliberately deviated from / could not verify (with reason); public API you added (`Args`, `run`, `run_phase`, stores, migrations); changes you need from shared modules (do not make them); verification results; open questions about Go behavior. Finish with `## Key Learnings` (1-5 standalone factual sentences, >= 4 words each).
+
+## Two-phase protocol (the dataset store lands while you work)
+Most phases read the convenio dataset (invoices and their lines). That store is being ported in parallel as task T1b (branch `feat/go-port-postgres` once merged; API documented in `docs/architecture.md` under "Dataset store"). So:
+- **Phase A (start now):** everything that does not need the dataset store: HTTP clients, pure logic, parsers, your own tables/migrations, mock servers, CLI args, and the parts of `run_phase` that do not read the dataset, all with tests. For what you need from the dataset, define your own small input structs (documented) so Phase B is a thin adapter. Commit. When only dataset-dependent work remains, STOP and return `status: phase-a-done` listing exactly what is left (files, functions, behavior IDs). If your phase needs nothing from the dataset, finish everything and return `done`.
+- **Phase B (the parent messages you):** run `git merge feat/go-port-postgres` inside your worktree (expect conflicts only in `Cargo.toml`/`Cargo.lock`/`config/keys.rs`; resolve by keeping both sides), read the "Dataset store" section of `docs/architecture.md`, finish the remaining work, then return `done`. Never rebase.
