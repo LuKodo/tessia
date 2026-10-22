@@ -1194,6 +1194,7 @@ mod tests {
                 std::fs::write(&path, content).expect("write");
                 UploadFile {
                     invoice: "FEV1".into(),
+                    rel: (*name).to_owned(),
                     path,
                     name: (*name).to_owned(),
                     size: content.len() as u64,

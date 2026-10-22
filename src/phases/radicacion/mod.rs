@@ -1,12 +1,16 @@
 //! `radicacion run` and `radicacion recheck-step2`: the Mutual Ser 4-step filing pipeline.
 
 pub mod api;
+pub mod archive;
 pub mod cli;
 pub mod client;
 pub mod confirm;
+pub mod engine;
+pub mod files;
 pub mod model;
 pub mod rules;
 pub mod timings;
+pub mod values;
 
 use anyhow::{Result, bail};
 
@@ -24,3 +28,6 @@ pub fn run(_ctx: &AppContext, _args: Args) -> Result<()> {
 pub fn run_phase(_ctx: &AppContext, _req: &PhaseRequest) -> Result<PhaseReport> {
     bail!("not implemented yet")
 }
+
+#[cfg(test)]
+mod engine_tests;

@@ -7,6 +7,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UploadFile {
     pub invoice: String,
+    /// Artifact path inside the cargue (`XML/FEV1_XML_PDF.zip`).
+    pub rel: String,
     /// Where the bytes are on this machine (inside the per-cargue workdir).
     pub path: PathBuf,
     /// Original file name registered in Mutual Ser.
