@@ -39,17 +39,24 @@ impl Harness {
         Self::build(MemoryNt::new(), f)
     }
 
+    /// Replaces parts of the context (a failing NT or bucket, settings).
+    pub fn with_context(f: impl FnOnce(AppContext) -> AppContext) -> Self {
+        Self::assemble(f)
+    }
+
     fn build(nt: MemoryNt, settings: impl FnOnce(Settings) -> Settings) -> Self {
+        Self::assemble(|ctx| {
+            let configured = settings(ctx.settings.clone());
+            let nt: Arc<dyn NtCatalog> = Arc::new(nt);
+            ctx.with_nt(nt).with_settings(configured)
+        })
+    }
+
+    fn assemble(f: impl FnOnce(AppContext) -> AppContext) -> Self {
         let db = TestDb::new();
         let objects = Arc::new(MemoryStore::new());
-        let nt: Arc<dyn NtCatalog> = Arc::new(nt);
         let bucket: Arc<dyn ObjectStore> = objects.clone();
-        let base = AppContext::for_tests(&db);
-        let ctx = base
-            .clone()
-            .with_objects(bucket)
-            .with_nt(nt)
-            .with_settings(settings(base.settings.clone()));
+        let ctx = f(AppContext::for_tests(&db).with_objects(bucket));
         let state = ApiState::new(ctx.clone(), db.pool(), Arc::new(JobRunner::new(ctx)));
         Self { db, state, objects }
     }
