@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Panel de cargues en vivo de Tessia." />
+    <title>Tessia — panel</title>
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/logo-icon.png" />
+    <script>
+      // Apply the saved theme before first paint to avoid a flash of the wrong one.
+      try {
+        var t = localStorage.getItem("tessia.theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <tx-app></tx-app>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
