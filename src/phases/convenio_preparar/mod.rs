@@ -2,7 +2,17 @@
 //!
 //! Skeleton: the owner of this phase replaces the bodies below.
 
+pub mod amount;
+pub mod catalog;
 pub mod cli;
+pub mod csv;
+pub mod mipres;
+pub mod mipres_client;
+pub mod nt_catalog;
+pub mod prepare;
+#[cfg(test)]
+mod prepare_tests;
+pub mod subplan;
 
 use anyhow::{Result, bail};
 
