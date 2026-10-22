@@ -78,6 +78,7 @@ pub mod pipeline;
 pub mod run;
 pub mod runner;
 pub mod seed;
+pub mod stdio;
 pub mod steps;
 pub mod supply;
 
@@ -95,7 +96,7 @@ pub use runner::PhaseRunner;
 pub fn run(ctx: &AppContext, args: Args) -> Result<()> {
     let Command::Run(args) = args.command;
     let cfg = args.to_config()?;
-    let events = Events::stdout(cfg.mode);
+    let stream = stdio::open(cfg.mode);
     let runner = PhaseRunner::real(&cfg);
-    execute(ctx, &cfg, &runner, &events).map(|_| ())
+    execute(ctx, &cfg, &runner, &stream.events).map(|_| ())
 }

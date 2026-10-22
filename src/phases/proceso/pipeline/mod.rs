@@ -682,3 +682,6 @@ fn count(state: &mut State, status: Status) {
         state.worst = state.worst.max(status);
     }
 }
+
+#[cfg(test)]
+mod tests;

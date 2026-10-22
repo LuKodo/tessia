@@ -22,8 +22,9 @@ pub enum Command {
     Run(Box<RunArgs>),
 }
 
-/// Pasa cada factura preparada de un cargue por todas las fases como un
-/// pipeline independiente por factura:
+/// Pasa cada factura preparada de un cargue por todas las fases (pipeline por factura).
+///
+/// Cada factura es un pipeline independiente:
 ///
 ///   thefactory -> fev -> (conciliar si fev marca VALOR_DIFERENTE) -> derechos
 ///   -> rips -> cuv -> soporte -> cola de radicación

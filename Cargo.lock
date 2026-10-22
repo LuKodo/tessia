@@ -2524,6 +2524,7 @@ dependencies = [
  "hex",
  "hostname",
  "image",
+ "libc",
  "lopdf",
  "md-5 0.10.6",
  "pq-sys",

@@ -34,7 +34,7 @@ pub enum Commands {
     },
     /// Proceso completo de un cargue
     Proceso(proceso::Args),
-    /// Procesa de punta a punta el día anterior (descarga, prepara y corre el proceso)
+    // The description (about) comes from `proceso::diario::Args`.
     Diario(proceso::diario::Args),
     // The description (about) comes from `conciliar::Args`.
     Conciliar(conciliar::Args),

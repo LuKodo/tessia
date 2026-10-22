@@ -37,9 +37,11 @@ use crate::context::AppContext;
 use crate::domain::cargue::load_context;
 use crate::phases::convenio_descargar::{self, DownloadOutcome, file_name};
 
-/// Procesa de punta a punta el día anterior (o --fecha): descarga el convenio
-/// de Medicar, lo prepara y corre `proceso run` sobre el cargue. Pensado para
-/// un cron diario en cualquier máquina; es idempotente y se puede ejecutar
+/// Procesa de punta a punta el día anterior (descarga, prepara y corre el proceso).
+///
+/// Descarga el convenio de Medicar del día (ayer, o --fecha), lo prepara y corre
+/// `proceso run` sobre ese cargue. Pensado para un cron diario en cualquier
+/// máquina; es idempotente y se puede ejecutar
 /// mientras otras máquinas procesan el mismo cargue a mano (cada factura se
 /// reclama por fase, así que el trabajo se reparte). Termina con código distinto
 /// de cero si la corrida falló o alguna factura quedó FAILED.
@@ -145,7 +147,7 @@ pub fn run(ctx: &AppContext, args: Args) -> Result<()> {
     let (cargue_id, _) = cargue_of(day);
     let mut cfg = RunConfig::new(&cargue_id);
     args.flags.apply(&mut cfg, args.workers)?;
-    let events = Events::stdout(cfg.mode);
+    let stream = super::stdio::open(cfg.mode);
     let runner = PhaseRunner::real(&cfg);
     let download =
         |ctx: &AppContext, day: NaiveDate| convenio_descargar::download_range(ctx, day, day);
@@ -156,9 +158,11 @@ pub fn run(ctx: &AppContext, args: Args) -> Result<()> {
         args.redescargar,
         &download,
         &runner,
-        &events,
+        &stream.events,
     );
-    // Stdout is the event stream in --json mode: the summary goes to stderr.
+    // Back to the real stdout; in --json mode it is the event stream, so the
+    // summary goes to stderr there.
+    drop(stream);
     let summary = outcome?;
     for line in summary.lines() {
         if cfg.mode == Mode::Json {
@@ -219,22 +223,28 @@ fn ensure_csv(
 ) -> Result<Csv> {
     let deadline = Instant::now() + cfg.tuning.prepare_wait;
     let lease = format!("convenio_descargar:{cargue_id}");
+    let downloading = || ctx.leases().holder(&lease).ok().flatten().is_some();
     let mut forced = redownload;
     loop {
+        if downloading() {
+            // Someone else is downloading this day: wait, then reuse their CSV.
+            forced = false;
+            if Instant::now() >= deadline || crate::shutdown::requested() {
+                bail!(
+                    "diario {day}: otra máquina sigue descargando el cargue {cargue_id}; se agotó la espera"
+                );
+            }
+            std::thread::sleep(cfg.tuning.prepare_poll);
+            continue;
+        }
         if !forced && csv_available(ctx, cargue_id, name)? {
             return Ok(Csv::Reused);
         }
         match download(ctx, day) {
             Ok(_) => return Ok(Csv::Downloaded),
-            Err(err) => {
-                let held = ctx.leases().holder(&lease).ok().flatten().is_some();
-                if !held || Instant::now() >= deadline || crate::shutdown::requested() {
-                    return Err(err.context(format!("diario {day}: descarga del convenio")));
-                }
-                // Someone else is downloading this day: wait, then reuse it.
-                forced = false;
-                std::thread::sleep(cfg.tuning.prepare_poll);
-            }
+            // It lost the race for the lease: wait for the winner.
+            Err(_) if downloading() && Instant::now() < deadline => forced = false,
+            Err(err) => return Err(err.context(format!("diario {day}: descarga del convenio"))),
         }
     }
 }

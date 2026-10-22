@@ -169,3 +169,27 @@ fn derechos_policy(ctx: &AppContext) -> Policy {
         _ => Policy::default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_real_runner_has_every_step() {
+        let runner = PhaseRunner::real(&RunConfig::new("C1"));
+        for step in [
+            "thefactory",
+            "fev",
+            "conciliar",
+            "derechos",
+            "rips",
+            "cuv",
+            "soporte",
+            "radicacion",
+        ] {
+            assert!(runner.get(step).is_some(), "{step}");
+        }
+        assert!(runner.get("siesa").is_none(), "siesa is never run");
+        assert!(runner.get("convenio").is_none());
+    }
+}
