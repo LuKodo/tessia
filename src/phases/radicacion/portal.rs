@@ -8,6 +8,7 @@
 //! the radicación.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,8 +17,10 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Int4, Nullable, Text, Timestamptz};
+use regex::Regex;
 
 use super::api::ApiError;
+use crate::context::AppContext;
 use crate::db::{DbPool, DbResult};
 use crate::domain::normalize_invoice;
 
@@ -519,6 +522,214 @@ fn register_catalog(conn: &mut PgConnection, findings: &[Finding]) -> DbResult<(
             .execute(conn)?;
     }
     Ok(())
+}
+
+/// Where a [`LookupResult`] came from.
+pub const SOURCE_DATABASE: &str = "base_de_datos";
+pub const SOURCE_PORTAL: &str = "portal";
+
+/// Shown when the portal has no row for the invoice yet.
+pub const MESSAGE_NOT_FOUND: &str = "El portal aún no tiene registro de esta factura";
+/// The `error` when no portal client can be built from the settings.
+pub const MESSAGE_NOT_CONFIGURED: &str = "Portal de Mutual Ser no configurado";
+const ERROR_PREFIX: &str = "No se pudo consultar el portal: ";
+/// Longest portal error cause shown to the user (characters).
+const MAX_CAUSE_CHARS: usize = 200;
+
+/// How long a non-final stored record is served before the portal is asked again.
+pub const DEFAULT_REFRESH: Duration = Duration::from_secs(30);
+/// Bound of the portal calls of one lookup.
+pub const DEFAULT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Tuning of [`lookup`].
+#[derive(Debug, Clone, Copy)]
+pub struct LookupOptions {
+    pub refresh: Duration,
+    pub timeout: Duration,
+}
+
+impl Default for LookupOptions {
+    fn default() -> Self {
+        Self {
+            refresh: DEFAULT_REFRESH,
+            timeout: DEFAULT_LOOKUP_TIMEOUT,
+        }
+    }
+}
+
+/// The answer of [`lookup`]: the stored or fresh snapshot plus where it came
+/// from and readable notes for the user (Go `portalcargue.Result`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LookupResult {
+    pub snapshot: Snapshot,
+    /// [`SOURCE_DATABASE`], [`SOURCE_PORTAL`] or empty when there is nothing.
+    pub source: &'static str,
+    pub message: String,
+    /// A readable portal error, never a raw dump.
+    pub error: String,
+}
+
+/// A failed portal query.
+enum QueryFailure {
+    Api(ApiError),
+    Timeout,
+}
+
+static URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| pattern(r"https?://\S+"));
+static BEARER_PATTERN: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?i)bearer\s+\S+"));
+static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r#"(?i)\b(token|password|passwd|secret|authorization|api[_-]?key)\b["']?\s*[=:]\s*\S+"#)
+});
+static EMAIL_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"));
+
+fn pattern(source: &str) -> Regex {
+    Regex::new(source).unwrap_or_else(|_| unreachable!("constant regex"))
+}
+
+/// Turns a portal failure into a short readable message: URLs, tokens and
+/// e-mail addresses are masked and the cause is cut to 200 characters, so an
+/// error dump never reaches the dashboard.
+fn portal_error(failure: &QueryFailure) -> String {
+    let cause = match failure {
+        QueryFailure::Timeout => "tiempo de espera agotado".to_owned(),
+        QueryFailure::Api(err) => scrub_cause(&err.to_string()),
+    };
+    format!("{ERROR_PREFIX}{cause}")
+}
+
+fn scrub_cause(message: &str) -> String {
+    if message.trim().is_empty() {
+        return "error desconocido".to_owned();
+    }
+    let cause = URL_PATTERN.replace_all(message, "[url]");
+    let cause = BEARER_PATTERN.replace_all(&cause, "[oculto]");
+    let cause = SECRET_PATTERN.replace_all(&cause, "[oculto]");
+    let cause = EMAIL_PATTERN.replace_all(&cause, "[correo]");
+    let cause = cause.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cause.chars().count() > MAX_CAUSE_CHARS {
+        let cut: String = cause.chars().take(MAX_CAUSE_CHARS - 1).collect();
+        return format!("{cut}…");
+    }
+    cause
+}
+
+/// One portal query bounded by `timeout`; on a timeout the query is abandoned
+/// (its thread ends with the HTTP client's own timeouts).
+fn fetch_bounded(
+    api: Arc<dyn PortalApi>,
+    invoice: &str,
+    prev: Option<Snapshot>,
+    now: DateTime<Utc>,
+    timeout: Duration,
+) -> Result<Snapshot, QueryFailure> {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    let invoice = invoice.to_owned();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch(api.as_ref(), &invoice, prev.as_ref(), now));
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(QueryFailure::Api),
+        Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(QueryFailure::Timeout),
+        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => Err(QueryFailure::Api(
+            ApiError::Other("la consulta al portal terminó de forma inesperada".to_owned()),
+        )),
+    }
+}
+
+fn needs_query(
+    stored: Option<&Snapshot>,
+    force: bool,
+    now: DateTime<Utc>,
+    refresh: Duration,
+) -> bool {
+    let Some(stored) = stored else { return true };
+    if force {
+        return true;
+    }
+    if stored.is_final {
+        return false;
+    }
+    let age = stored
+        .queried_at
+        .map(|at| now.signed_duration_since(at))
+        .and_then(|d| d.to_std().ok());
+    age.is_none_or(|age| age >= refresh)
+}
+
+fn from_store(stored: Option<Snapshot>) -> LookupResult {
+    match stored {
+        Some(snapshot) => LookupResult {
+            snapshot,
+            source: SOURCE_DATABASE,
+            ..LookupResult::default()
+        },
+        None => LookupResult::default(),
+    }
+}
+
+/// The portal result of `invoice`, database first (Go `portalcargue.Service`):
+/// a stored final record is returned without calling the portal, a stored
+/// non-final one is queried again at most every `refresh`, and when nothing is
+/// stored (or `force`) the portal is queried and the answer saved. A portal
+/// failure is reported in `error` together with whatever is stored; only a
+/// store failure is an `Err`. `api` builds the portal client lazily and returns
+/// `None` when the portal is not configured.
+pub fn lookup(
+    store: &PortalStore,
+    api: impl FnOnce() -> Option<Arc<dyn PortalApi>>,
+    invoice: &str,
+    force: bool,
+    now: DateTime<Utc>,
+    options: &LookupOptions,
+) -> DbResult<LookupResult> {
+    let key = normalize_invoice(invoice);
+    let stored = store.get(&key)?;
+    if !needs_query(stored.as_ref(), force, now, options.refresh) {
+        return Ok(from_store(stored));
+    }
+    let Some(api) = api() else {
+        let mut result = from_store(stored);
+        result.error = MESSAGE_NOT_CONFIGURED.to_owned();
+        return Ok(result);
+    };
+    match fetch_bounded(api, &key, stored.clone(), now, options.timeout) {
+        Err(failure) => {
+            let mut result = from_store(stored);
+            result.error = portal_error(&failure);
+            Ok(result)
+        }
+        Ok(snapshot) if !snapshot.found => {
+            let mut result = match stored {
+                Some(_) => from_store(stored),
+                None => LookupResult {
+                    snapshot,
+                    source: SOURCE_PORTAL,
+                    ..LookupResult::default()
+                },
+            };
+            result.message = MESSAGE_NOT_FOUND.to_owned();
+            Ok(result)
+        }
+        Ok(mut snapshot) => {
+            snapshot.record.invoice = key;
+            store.save(&snapshot)?;
+            Ok(LookupResult {
+                snapshot,
+                source: SOURCE_PORTAL,
+                ..LookupResult::default()
+            })
+        }
+    }
+}
+
+/// The Mutual Ser client for on-demand portal queries, built from the
+/// `zonaser.*` settings exactly like the radicación run; `Err` when they are
+/// incomplete.
+pub fn portal_client(ctx: &AppContext) -> anyhow::Result<Arc<dyn PortalApi>> {
+    let nit = super::nit(ctx)?;
+    let client = super::build_client(ctx, &nit, None)?;
+    Ok(Arc::new(client))
 }
 
 /// Wait before each portal query of one invoice: 10 s, 15 s and 30 s, then
@@ -1195,5 +1406,73 @@ mod tests {
             .map(|c| (c.code.as_str(), c.detail()))
             .collect();
         assert_eq!(seen, [("ABC1", ""), ("RVC012", "alfa")]);
+    }
+
+    #[test]
+    fn portal_errors_hide_urls_tokens_secrets_and_emails() {
+        let failure = QueryFailure::Api(ApiError::Other(
+            "post https://zonaser.example.org/api/x?token=abc failed: Bearer eyJhbGci.abc \
+             password=hunter2 api_key: K-1 user ops@example.org\n  boom"
+                .to_owned(),
+        ));
+        let message = portal_error(&failure);
+        assert_eq!(
+            message,
+            "No se pudo consultar el portal: post [url] failed: [oculto] [oculto] [oculto] user [correo] boom"
+        );
+        for secret in ["zonaser", "eyJhbGci", "hunter2", "K-1", "ops@"] {
+            assert!(!message.contains(secret), "{secret}");
+        }
+    }
+
+    #[test]
+    fn portal_errors_are_cut_to_two_hundred_characters() {
+        let long = QueryFailure::Api(ApiError::Other("ñ".repeat(500)));
+        let message = portal_error(&long);
+        let cause = message.strip_prefix(ERROR_PREFIX).expect("prefix");
+        assert_eq!(cause.chars().count(), 200);
+        assert!(cause.ends_with('…'));
+        assert_eq!(
+            portal_error(&QueryFailure::Api(ApiError::Other("  ".into()))),
+            "No se pudo consultar el portal: error desconocido"
+        );
+        assert_eq!(
+            portal_error(&QueryFailure::Timeout),
+            "No se pudo consultar el portal: tiempo de espera agotado"
+        );
+    }
+
+    #[test]
+    fn the_refresh_rule_serves_final_records_and_ages_the_others() {
+        let now = Utc::now();
+        let refresh = Duration::from_secs(30);
+        let stored = |is_final: bool, age: Option<i64>| Snapshot {
+            found: true,
+            is_final,
+            queried_at: age.map(|s| now - chrono::Duration::seconds(s)),
+            ..Snapshot::default()
+        };
+        assert!(needs_query(None, false, now, refresh), "nothing stored");
+        assert!(
+            needs_query(Some(&stored(true, Some(1))), true, now, refresh),
+            "forced"
+        );
+        assert!(
+            !needs_query(Some(&stored(true, Some(9999))), false, now, refresh),
+            "final"
+        );
+        assert!(!needs_query(
+            Some(&stored(false, Some(29))),
+            false,
+            now,
+            refresh
+        ));
+        assert!(needs_query(
+            Some(&stored(false, Some(30))),
+            false,
+            now,
+            refresh
+        ));
+        assert!(needs_query(Some(&stored(false, None)), false, now, refresh));
     }
 }

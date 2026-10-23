@@ -671,3 +671,256 @@ fn only_get_is_routed_for_the_radicadas_report() {
     let response = env.post("/api/reportes/radicadas");
     assert_eq!(response.status, 405);
 }
+
+// ---- portal ----------------------------------------------------------------
+
+use std::sync::{Arc, Mutex};
+
+use tessia::testing::{MockResponse, MockServer, RecordedRequest};
+
+/// How the scripted Mutual Ser portal answers `core/filtersAll`.
+#[derive(Clone)]
+enum Portal {
+    Row(Value),
+    Empty,
+    Fail(&'static str),
+}
+
+fn portal_server(portal: Arc<Mutex<Portal>>) -> MockServer {
+    MockServer::start(move |req: &RecordedRequest| {
+        let path = req.path.split('?').next().unwrap_or_default();
+        match path {
+            "/login" => MockResponse::json(200, r#"{"access_token":"tok","expires_in":3600}"#),
+            "/rips-api/core/filtersAll" => match portal.lock().expect("portal").clone() {
+                Portal::Row(row) => {
+                    MockResponse::json(200, &json!({"contenido": [row]}).to_string())
+                }
+                Portal::Empty => MockResponse::json(200, r#"{"contenido":[]}"#),
+                Portal::Fail(body) => MockResponse::text(400, body),
+            },
+            p if p.starts_with("/rips-api/core/findDetailsByFile/") => MockResponse::json(
+                200,
+                r#"[{"codigo":"A1","tipo":"ADVERTENCIA","campo":"edad","detalle":"revisar"},
+                    {"codigo":"E9","tipo":"ERROR","campo":"","detalle":"falta"}]"#,
+            ),
+            _ => MockResponse::text(404, ""),
+        }
+    })
+}
+
+fn portal_row(invoice: &str, status: &str) -> Value {
+    json!({
+        "numero_factura": invoice, "estado": status, "remision": "R7", "usuario": "ops@example.org",
+        "servicios": "[1]", "modalidad": "EVENTO", "nombreArchivo": format!("{invoice}.json"),
+        "idArchivo": format!("f-{invoice}"), "idCargue": "c1", "tipoEvento": "REGISTER_RIP",
+        "fecha_cargue": "29-09-2026 17:01:26", "documento_soporte": {"id": "s1", "estado": "ACTIVE"}
+    })
+}
+
+fn portal_env(portal: &Arc<Mutex<Portal>>) -> (Env, MockServer) {
+    let server = portal_server(portal.clone());
+    let url = server.url().to_owned();
+    let env = env_with(vec![
+        ("TESSIA_ZONASER_LOGIN_URL", format!("{url}/login")),
+        (
+            "TESSIA_ZONASER_BENAVENTE_BASE_URL",
+            format!("{url}/rips-api"),
+        ),
+        ("TESSIA_ZONASER_USERNAME", "user".to_owned()),
+        ("TESSIA_ZONASER_PASSWORD", "secret".to_owned()),
+        ("TESSIA_ZONASER_ORGANIZATION_NIT", "900111222".to_owned()),
+    ]);
+    (env, server)
+}
+
+fn portal_calls(server: &MockServer) -> usize {
+    server
+        .requests()
+        .iter()
+        .filter(|r| r.path.ends_with("/core/filtersAll"))
+        .count()
+}
+
+#[test]
+fn a_first_lookup_queries_the_portal_stores_the_result_and_then_serves_it_from_the_database() {
+    let portal = Arc::new(Mutex::new(Portal::Row(portal_row(
+        "FEV1",
+        "VALIDADO_CON_ADVERTENCIA",
+    ))));
+    let (env, server) = portal_env(&portal);
+
+    let first = env.get("/api/facturas/fev-1/portal", &[]);
+    assert_eq!(first.status, 200);
+    assert_eq!(first.header("cache-control"), Some("no-store"));
+    let mut body = json(&first);
+    let queried = body["consultado_en"]
+        .as_str()
+        .expect("consultado_en")
+        .to_owned();
+    assert!(queried.ends_with('Z'), "{queried}");
+    body["consultado_en"] = json!("NOW");
+    assert_eq!(
+        body,
+        json!({
+            "factura": "FEV1", "consultado": true, "final": true, "estado": "VALIDADO_CON_ADVERTENCIA",
+            "remision": "R7", "fecha_cargue": "2026-09-29T17:01:26-05:00", "fecha_cargue_texto": "29-09-2026 17:01:26",
+            "usuario": "ops@example.org", "servicios": "[1]", "modalidad": "EVENTO", "nombre_archivo": "FEV1.json",
+            "id_archivo": "f-FEV1", "id_cargue": "c1", "id_evento": "", "tipo_evento": "REGISTER_RIP", "tipo_error": "",
+            "codigo_error": "", "devuelto": false, "fecha_expedicion": "", "receipt_name": "",
+            "documento_soporte": {"id": "s1", "estado": "ACTIVE"}, "advertencias": 1, "errores": 1,
+            "hallazgos": [
+                {"codigo": "A1", "tipo": "ADVERTENCIA", "campo": "edad", "detalle": "revisar"},
+                {"codigo": "E9", "tipo": "ERROR", "campo": "", "detalle": "falta"}
+            ],
+            "consultas": 1, "consultado_en": "NOW", "origen": "portal", "mensaje": "", "error": ""
+        })
+    );
+    assert_eq!(portal_calls(&server), 1);
+
+    // Final and stored: served from the database, no new portal call.
+    let again = json(&env.get("/api/facturas/FEV1/portal", &[]));
+    assert_eq!(again["origen"], json!("base_de_datos"));
+    assert_eq!(again["consultas"], json!(1));
+    assert_eq!(again["hallazgos"].as_array().map(Vec::len), Some(2));
+    assert_eq!(portal_calls(&server), 1);
+
+    // The findings fed the catalog behind /api/hallazgos.
+    let catalog = json(&env.get("/api/hallazgos", &[]));
+    assert_eq!(catalog["total"], json!(2));
+
+    // POST forces a query even when the stored result is final.
+    let refreshed = env.post("/api/facturas/FEV1/portal/actualizar");
+    assert_eq!(refreshed.status, 200);
+    assert_eq!(refreshed.header("cache-control"), Some("no-store"));
+    let refreshed = json(&refreshed);
+    assert_eq!(
+        (refreshed["origen"].clone(), refreshed["consultas"].clone()),
+        (json!("portal"), json!(2))
+    );
+    assert_eq!(portal_calls(&server), 2);
+}
+
+#[test]
+fn a_portal_failure_is_a_200_with_a_scrubbed_error_and_keeps_the_stored_data() {
+    let portal = Arc::new(Mutex::new(Portal::Row(portal_row("FEV1", "EN PROCESO"))));
+    let (env, server) = portal_env(&portal);
+    let stored = json(&env.get("/api/facturas/FEV1/portal", &[]));
+    assert_eq!(stored["final"], json!(false));
+
+    *portal.lock().expect("portal") = Portal::Fail(
+        "denied for ops@example.org at https://zonaser.example.org/x with token=abc123 Bearer xyz",
+    );
+    let response = env.post("/api/facturas/FEV1/portal/actualizar");
+    assert_eq!(response.status, 200);
+    let body = json(&response);
+    let message = body["error"].as_str().expect("error");
+    assert!(
+        message.starts_with("No se pudo consultar el portal: "),
+        "{message}"
+    );
+    for secret in ["ops@example.org", "zonaser.example.org", "abc123", "xyz"] {
+        assert!(!message.contains(secret), "{message}");
+    }
+    assert!(message.chars().count() <= "No se pudo consultar el portal: ".chars().count() + 200);
+    // What was stored stays in the answer.
+    assert_eq!(
+        (
+            body["consultado"].clone(),
+            body["estado"].clone(),
+            body["origen"].clone()
+        ),
+        (json!(true), json!("EN PROCESO"), json!("base_de_datos"))
+    );
+    assert!(portal_calls(&server) >= 2);
+}
+
+#[test]
+fn an_invoice_the_portal_does_not_know_yet_gets_a_message_not_an_error() {
+    let portal = Arc::new(Mutex::new(Portal::Empty));
+    let (env, _server) = portal_env(&portal);
+    let body = json(&env.get("/api/facturas/FEV9/portal", &[]));
+    assert_eq!(body["consultado"], json!(false));
+    assert_eq!(
+        body["mensaje"],
+        json!("El portal aún no tiene registro de esta factura")
+    );
+    assert_eq!(
+        (body["origen"].clone(), body["error"].clone()),
+        (json!("portal"), json!(""))
+    );
+    assert_eq!(body["hallazgos"], json!([]));
+    assert_eq!(body["documento_soporte"], Value::Null);
+    // Nothing was written: "not found yet" never creates a record.
+    assert!(
+        PortalStore::new(env.db.pool())
+            .get("FEV9")
+            .expect("get")
+            .is_none()
+    );
+}
+
+#[test]
+fn a_non_final_record_is_queried_again_only_after_thirty_seconds() {
+    let portal = Arc::new(Mutex::new(Portal::Row(portal_row("FEV1", "EN PROCESO"))));
+    let (env, server) = portal_env(&portal);
+    env.get("/api/facturas/FEV1/portal", &[]);
+    assert_eq!(portal_calls(&server), 1);
+    env.get("/api/facturas/FEV1/portal", &[]);
+    assert_eq!(portal_calls(&server), 1, "younger than 30 s");
+
+    let mut conn = env.db.conn();
+    diesel::RunQueryDsl::execute(
+        diesel::sql_query("UPDATE portal_cargue SET consultado_en = now() - interval '31 seconds'"),
+        &mut conn,
+    )
+    .expect("age the record");
+    drop(conn);
+    *portal.lock().expect("portal") = Portal::Row(portal_row("FEV1", "VALIDADO"));
+    let body = json(&env.get("/api/facturas/FEV1/portal", &[]));
+    assert_eq!(
+        (
+            body["estado"].clone(),
+            body["origen"].clone(),
+            body["consultas"].clone()
+        ),
+        (json!("VALIDADO"), json!("portal"), json!(2))
+    );
+    assert_eq!(portal_calls(&server), 2);
+}
+
+#[test]
+fn without_portal_settings_the_lookup_says_so_and_still_answers_200() {
+    let env = env();
+    let body = json(&env.get("/api/facturas/FEV1/portal", &[]));
+    assert_eq!(body["error"], json!("Portal de Mutual Ser no configurado"));
+    assert_eq!(
+        (body["consultado"].clone(), body["origen"].clone()),
+        (json!(false), json!(""))
+    );
+    let posted = env.post("/api/facturas/FEV1/portal/actualizar");
+    assert_eq!(posted.status, 200);
+    assert_eq!(
+        json(&posted)["error"],
+        json!("Portal de Mutual Ser no configurado")
+    );
+}
+
+#[test]
+fn the_portal_routes_validate_the_invoice_and_the_method() {
+    let env = env();
+    for bad in ["12345", "AB1", "FEV", "FEV-1x", "%20"] {
+        let response = env.get(&format!("/api/facturas/{bad}/portal"), &[]);
+        assert_eq!(
+            (response.status, error(&response)),
+            (400, "factura inválida".to_owned()),
+            "{bad}"
+        );
+        let response = env.post(&format!("/api/facturas/{bad}/portal/actualizar"));
+        assert_eq!(response.status, 400, "{bad}");
+    }
+    assert_eq!(env.post("/api/facturas/FEV1/portal").status, 405);
+    assert_eq!(
+        env.get("/api/facturas/FEV1/portal/actualizar", &[]).status,
+        405
+    );
+}
