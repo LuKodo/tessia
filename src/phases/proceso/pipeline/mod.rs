@@ -634,6 +634,12 @@ impl Run<'_> {
         }
         batch.sort();
         let _serial = lock(&self.fire_lock);
+        // One enter per invoice so the dashboard shows the batch as in progress
+        // while it uploads (the `radicacion` event only arrives when it ends).
+        for _ in &batch {
+            self.events
+                .emit(Event::new("radicacion_enter").step(gate.label));
+        }
         let started = Instant::now();
         let fired = fire(&batch);
         let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);

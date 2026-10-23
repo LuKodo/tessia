@@ -53,8 +53,7 @@
 //! No dry-run/`--live`/confirmation; the positional argument is a CSV path or a
 //! cargue id instead of a load folder; `--nota-tecnica` and `--out` are gone;
 //! `radicacion_tiempos` and the timing block belong to radicación (stderr);
-//! the dashboard observer, `convenio_progress` and `radicacion_enter` events
-//! are not emitted; the adaptive concurrency halves on a transient Postgres
+//! the dashboard observer and `convenio_progress` events are not emitted; the adaptive concurrency halves on a transient Postgres
 //! conflict that survived the store's retries (serialization failure,
 //! deadlock, lost connection) instead of on MySQL lock conflicts (the grow
 //! back numbers are Go's: hold 40 finished invoices, +1 per 20 clean ones);

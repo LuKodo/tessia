@@ -489,6 +489,24 @@ fn uploads_never_overlap_even_with_the_timer_and_the_threshold() {
 }
 
 #[test]
+fn every_filed_invoice_is_announced_as_entering_radicacion_before_its_batch_ends() {
+    let mut cfg = config(vec![spec("a", 1, None)], &["i1", "i2", "i3"]);
+    cfg.gate = gate(10, Duration::ZERO);
+    let fires = Fires::default();
+    let fire = |b: &[String]| fires.fire(b);
+    let (_, seen) = go(&cfg, &ok, Some(&fire), None);
+    let enters = of_type(&seen, "radicacion_enter");
+    assert_eq!(enters.len(), 3);
+    let all = seen.lock().expect("events");
+    let first_enter = all.iter().position(|e| e.kind == "radicacion_enter");
+    let batch_end = all.iter().position(|e| e.kind == "radicacion");
+    assert!(
+        first_enter < batch_end,
+        "enter events precede the batch result"
+    );
+}
+
+#[test]
 fn a_failed_batch_is_a_failed_run_and_a_batch_left_to_another_machine_is_not() {
     let mut cfg = config(vec![spec("a", 1, None)], &["i1", "i2"]);
     cfg.gate = gate(10, Duration::ZERO);
