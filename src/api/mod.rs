@@ -8,6 +8,7 @@ pub mod cache;
 pub mod csv;
 pub mod errors;
 pub mod guard;
+pub mod http;
 pub mod read;
 pub mod request;
 pub mod router;
@@ -30,6 +31,10 @@ pub struct ApiState {
     pub jobs: Arc<JobRunner>,
     /// Random hex per process; the UI detects a restart when it changes.
     pub instance: String,
+    /// App origins trusted by the same-origin guard; the shell registers its own.
+    pub origins: guard::OriginGuard,
+    /// Shared 2.5 s answer cache of the heavy GET routes.
+    pub cache: cache::Cache,
 }
 
 impl ApiState {
@@ -40,7 +45,15 @@ impl ApiState {
             pool,
             jobs,
             instance,
+            origins: guard::OriginGuard::new(),
+            cache: cache::Cache::new(),
         }
+    }
+
+    /// Trusts one more app origin on the state-changing routes (the origin the
+    /// shell's custom protocol is served from).
+    pub fn allow_origin(&self, origin: &str) {
+        self.origins.allow(origin);
     }
 
     /// Routes one request. Never panics on a bad request.
