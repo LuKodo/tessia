@@ -1,14 +1,18 @@
 //! The in-process job runner: one job at a time, synthetic log, JSONL history.
+//!
+//! * [`runner`]: [`JobRunner`] (start, cancel, close) and [`JobBackend`], what
+//!   each kind of job executes;
+//! * [`snapshot`]: a job's live state and the polled [`JobSnapshot`];
+//! * [`synthetic_log`]: the Spanish `salida`;
+//! * [`history`]: the JSONL file of finished jobs.
 
-use crate::context::AppContext;
+pub mod history;
+pub mod runner;
+pub mod snapshot;
+pub mod synthetic_log;
 
-/// Placeholder until the job runner task lands.
-pub struct JobRunner {
-    pub ctx: AppContext,
-}
-
-impl JobRunner {
-    pub fn new(ctx: AppContext) -> Self {
-        Self { ctx }
-    }
-}
+pub use history::HistoryEntry;
+pub use runner::{
+    CANCELLED_ERROR, JobBackend, JobRunner, NoJobRunning, StartError, StartOptions, Work,
+};
+pub use snapshot::{JobConvenio, JobSnapshot, JobStats, PhaseProgress};
