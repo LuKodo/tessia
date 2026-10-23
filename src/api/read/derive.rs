@@ -16,7 +16,7 @@ use regex::Regex;
 use rust_decimal::Decimal;
 use serde::{Serialize, Serializer};
 
-use crate::api::{ApiError, ApiResult, ApiState, Request};
+use crate::api::{ApiResult, ApiState, Request};
 use crate::domain::dataset::InvoiceState;
 use crate::domain::radicacion::RadStatus;
 use crate::phases::radicacion::rules::{
@@ -402,6 +402,47 @@ pub fn is_incident(estado: &str) -> bool {
     )
 }
 
+/// The "Resumen de estados" panel: prepared invoices only (Go `KPIs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Kpis {
+    pub total: usize,
+    pub no_radicado: usize,
+    pub radicadas: usize,
+    pub rechazadas: usize,
+    pub radicacion_parcial: usize,
+    pub nota_ajuste: usize,
+    pub listas_para_radicar: usize,
+    pub nota_credito: usize,
+    pub en_proceso: usize,
+    pub sin_autorizacion: usize,
+}
+
+impl Kpis {
+    /// Counts one prepared row: its pipeline, its notes and a missing
+    /// authorization.
+    pub fn add(&mut self, d: &Derived) {
+        self.total += 1;
+        match d.pipeline {
+            PIPELINE_NO_RADICADO => self.no_radicado += 1,
+            PIPELINE_EN_PROCESO => self.en_proceso += 1,
+            PIPELINE_LISTA => self.listas_para_radicar += 1,
+            PIPELINE_PARCIAL => self.radicacion_parcial += 1,
+            PIPELINE_RADICADA => self.radicadas += 1,
+            PIPELINE_RECHAZADA => self.rechazadas += 1,
+            _ => {}
+        }
+        if d.note_adjustment {
+            self.nota_ajuste += 1;
+        }
+        if d.note_credit {
+            self.nota_credito += 1;
+        }
+        if d.alerts.contains(&ALERT_SIN_AUTORIZACION) {
+            self.sin_autorizacion += 1;
+        }
+    }
+}
+
 /// The "ID MIPRES" cell: the verified delivery id for EVENTO NO PBS (empty when
 /// none was verified), `No aplica` for any other known subplan, empty when the
 /// subplan is unknown (it is never guessed).
@@ -578,11 +619,6 @@ pub fn cache_key(route: &str, req: &Request) -> String {
     let mut pairs: Vec<String> = req.query.iter().map(|(k, v)| format!("{k}={v}")).collect();
     pairs.sort();
     format!("{route}?{}", pairs.join("&"))
-}
-
-/// The generic 500 of a read route (never a raw database error).
-pub fn internal(message: &str) -> ApiError {
-    ApiError::internal(message)
 }
 
 #[cfg(test)]
