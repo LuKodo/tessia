@@ -1,0 +1,55 @@
+{
+ "xml": [
+  {
+   "name": "contributivo",
+   "regimen": "01",
+   "contrato": "CT-SINT&<1>",
+   "input": "xml/contributivo.input.xml",
+   "download": "xml/contributivo.download.xml",
+   "contrato_existe": true,
+   "ministerio": "xml/contributivo.ministerio.xml",
+   "error": null,
+   "ministerio2": "xml/contributivo.ministerio2.xml"
+  },
+  {
+   "name": "subsidiado",
+   "regimen": "04",
+   "contrato": "CT-SINT-2",
+   "input": "xml/subsidiado.input.xml",
+   "download": "xml/subsidiado.download.xml",
+   "contrato_existe": true,
+   "ministerio": "xml/subsidiado.ministerio.xml",
+   "error": null,
+   "ministerio2": "xml/subsidiado.ministerio2.xml"
+  },
+  {
+   "name": "sin_usuario",
+   "regimen": "",
+   "contrato": "CT-SINT-3",
+   "input": "xml/sin_usuario.input.xml",
+   "download": "xml/sin_usuario.download.xml",
+   "contrato_existe": true,
+   "ministerio": "xml/sin_usuario.ministerio.xml",
+   "error": null,
+   "ministerio2": "xml/sin_usuario.ministerio2.xml"
+  },
+  {
+   "name": "periodo_parcial",
+   "regimen": "01",
+   "contrato": "CT-SINT-4",
+   "input": "xml/periodo_parcial.input.xml",
+   "download": "xml/periodo_parcial.download.xml",
+   "contrato_existe": true,
+   "ministerio": "xml/periodo_parcial.ministerio.xml",
+   "error": "IOException: No se pudo garantizar la fecha inicial del periodo en todos los periodos del XML: 2025-01-01"
+  },
+  {
+   "name": "sin_contrato",
+   "regimen": "01",
+   "contrato": "CT-SINT-5",
+   "input": "xml/sin_contrato.input.xml",
+   "download": "xml/sin_contrato.download.xml",
+   "contrato_existe": false
+  }
+ ]
+}

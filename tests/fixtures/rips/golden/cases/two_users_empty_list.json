@@ -1,0 +1,95 @@
+{
+  "numDocumentoIdObligado": "806011811",
+  "numFactura": "FVS1000004",
+  "tipoNota": null,
+  "numNota": null,
+  "usuarios": [
+    {
+      "tipoDocumentoIdentificacion": "CC",
+      "numDocumentoIdentificacion": "900000004",
+      "tipoUsuario": "01",
+      "fechaNacimiento": "1970-07-07",
+      "codSexo": "M",
+      "codPaisResidencia": "031",
+      "codMunicipioResidencia": "13001",
+      "codZonaTerritorialResidencia": "02",
+      "incapacidad": "NO",
+      "consecutivo": 1,
+      "codPaisOrigen": "031",
+      "registroSIRAS": null,
+      "servicios": {
+        "medicamentos": [],
+        "otrosServicios": [
+          {
+            "codPrestador": "130018500201",
+            "numAutorizacion": "",
+            "idMIPRES": null,
+            "fechaSuministroTecnologia": "2026-09-06 12:00",
+            "tipoOS": "01",
+            "codTecnologiaSalud": "OS-4",
+            "nomTecnologiaSalud": "ITEM",
+            "cantidadOS": 1,
+            "tipoDocumentoIdentificacion": "CC",
+            "numDocumentoIdentificacion": "11111111",
+            "vrUnitOS": 1,
+            "vrDispensacion": 0,
+            "vrServicio": 1,
+            "conceptoRecaudo": "05",
+            "valorPagoModerador": 0,
+            "numFEVPagoModerador": null,
+            "codigoVIDA": null,
+            "consecutivo": 1
+          }
+        ]
+      }
+    },
+    {
+      "tipoDocumentoIdentificacion": "CE",
+      "numDocumentoIdentificacion": "900000005",
+      "tipoUsuario": "04",
+      "fechaNacimiento": "1985-02-03",
+      "codSexo": "F",
+      "codPaisResidencia": "031",
+      "codMunicipioResidencia": "13001",
+      "codZonaTerritorialResidencia": "01",
+      "incapacidad": "NO",
+      "consecutivo": 1,
+      "codPaisOrigen": "031",
+      "registroSIRAS": null,
+      "servicios": {
+        "medicamentos": [
+          {
+            "codPrestador": "130018500201",
+            "idMIPRES": "777",
+            "fechaDispensAdmon": "2026-09-06 13:00",
+            "codDiagnosticoPrincipal": "A01",
+            "codDiagnosticoPrincipalCIE11": null,
+            "nomCodDiagnosticoPrincipalCIE11": null,
+            "codDiagnosticoRelacionado": "A01",
+            "codDiagnosticoRelacionadoCIE11": null,
+            "nomCodDiagnosticoRelacionadoCIE11": null,
+            "tipoMedicamento": "01",
+            "codTecnologiaSalud": "CUM-5",
+            "nomTecnologiaSalud": "X",
+            "concentracionMedicamento": -1,
+            "unidadMedida": 2147483647,
+            "formaFarmaceutica": "NA",
+            "unidadMinDispensa": 1,
+            "cantidadMedicamento": 1,
+            "diasTratamiento": 30,
+            "tipoDocumentoIdentificacion": "CC",
+            "numDocumentoIdentificacion": "11111111",
+            "vrUnitMedicamento": 1,
+            "vrDispensacion": 0,
+            "vrServicio": 1,
+            "conceptoRecaudo": "05",
+            "valorPagoModerador": 0,
+            "numFEVPagoModerador": null,
+            "consecutivo": 1,
+            "codigoVIDA": null
+          }
+        ]
+      }
+    }
+  ]
+}

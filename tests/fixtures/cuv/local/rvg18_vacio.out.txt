@@ -1,0 +1,6 @@
+{
+  "ResultadosValidacion": [],
+  "CodigoUnicoValidacion": "",
+  "ResultState": true,
+  "ProcesoId": 4242
+}

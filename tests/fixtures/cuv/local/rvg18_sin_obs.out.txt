@@ -1,0 +1,12 @@
+{
+  "ResultadosValidacion": [
+    {
+      "Codigo": "RVG18"
+    },
+    {
+      "Codigo": "RVG18",
+      "Observaciones": "1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1dddd1"
+    }
+  ],
+  "ResultState": true
+}

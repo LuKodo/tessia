@@ -1,11 +1,8 @@
-//! Wall-clock timing of the command's steps, measured with the monotonic
-//! [`Instant`], and the timestamp-based ids shared by loads and Nota Técnica
-//! versions.
+//! Wall-clock timing of a command's steps, measured with the monotonic
+//! [`Instant`]. Phases print the "Tiempos:" section with
+//! [`timings_section`] at the end of their output.
 
 use std::time::{Duration, Instant};
-
-use chrono::Local;
-use uuid::Uuid;
 
 /// Step durations in the order they were recorded.
 #[derive(Debug, Default)]
@@ -46,15 +43,6 @@ pub fn measure<T>(step: impl FnOnce() -> T) -> (T, Duration) {
     let started = Instant::now();
     let result = step();
     (result, started.elapsed())
-}
-
-/// Builds `YYYYMMDD_HHMMSS_<8 hex chars of a v4 UUID>`, using local time.
-///
-/// The random suffix keeps ids unique even within the same second.
-pub fn new_timestamped_id() -> String {
-    let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-    let suffix = &Uuid::new_v4().simple().to_string()[..8];
-    format!("{timestamp}_{suffix}")
 }
 
 /// Lines of the "Tiempos:" section, preceded by a blank line.
@@ -141,25 +129,6 @@ mod tests {
         assert_eq!(value, 42);
         assert_eq!(timings.steps().len(), 1);
         assert_eq!(timings.steps()[0].0, "step");
-    }
-
-    #[test]
-    fn timestamped_id_has_timestamp_and_8_hex_suffix() {
-        let id = new_timestamped_id();
-        let parts: Vec<&str> = id.split('_').collect();
-
-        assert_eq!(parts.len(), 3, "unexpected id: {id}");
-        assert_eq!(parts[0].len(), 8);
-        assert!(parts[0].bytes().all(|b| b.is_ascii_digit()));
-        assert_eq!(parts[1].len(), 6);
-        assert!(parts[1].bytes().all(|b| b.is_ascii_digit()));
-        assert_eq!(parts[2].len(), 8);
-        assert!(parts[2].bytes().all(|b| b.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn timestamped_ids_are_unique() {
-        assert_ne!(new_timestamped_id(), new_timestamped_id());
     }
 
     #[test]

@@ -1,0 +1,346 @@
+[
+  {
+    "name": "full",
+    "input": {
+      "numDocumentoIdObligado": "806011811",
+      "numFactura": "FVS1000001",
+      "tipoNota": null,
+      "numNota": null,
+      "usuarios": [
+        {
+          "tipoDocumentoIdentificacion": "CC",
+          "numDocumentoIdentificacion": "900000001",
+          "tipoUsuario": "01",
+          "fechaNacimiento": "1990-01-02",
+          "codSexo": "F",
+          "codPaisResidencia": "031",
+          "codMunicipioResidencia": "13001",
+          "codZonaTerritorialResidencia": "02",
+          "incapacidad": "NO",
+          "consecutivo": 1,
+          "codPaisOrigen": "031",
+          "registroSIRAS": null,
+          "servicios": {
+            "otrosServicios": [
+              {
+                "codPrestador": "130018500201",
+                "numAutorizacion": "",
+                "idMIPRES": "x-99",
+                "fechaSuministroTecnologia": "2026-09-03 10:30",
+                "tipoOS": "01",
+                "codTecnologiaSalud": "CUM-OS",
+                "nomTecnologiaSalud": "GASA (ESTERIL)\tTAB",
+                "cantidadOS": 3,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitOS": 100,
+                "vrDispensacion": 0,
+                "vrServicio": 300,
+                "conceptoRecaudo": "05",
+                "valorPagoModerador": 0,
+                "numFEVPagoModerador": null,
+                "codigoVIDA": null,
+                "consecutivo": 1
+              },
+              {
+                "codPrestador": "130018500201",
+                "numAutorizacion": "AUT 1",
+                "idMIPRES": null,
+                "fechaSuministroTecnologia": "2026-09-03 11:00",
+                "tipoOS": "01",
+                "codTecnologiaSalud": "CUM-OS2",
+                "nomTecnologiaSalud": "LINE\u2028SEP\u2029END\u0001",
+                "cantidadOS": 1,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitOS": 0,
+                "vrDispensacion": 0,
+                "vrServicio": 0,
+                "conceptoRecaudo": "02",
+                "valorPagoModerador": 50,
+                "numFEVPagoModerador": "0",
+                "codigoVIDA": null,
+                "consecutivo": 2
+              }
+            ],
+            "medicamentos": [
+              {
+                "codPrestador": "130018500201",
+                "idMIPRES": " 20260901123 ",
+                "fechaDispensAdmon": "2026-09-01 07:05",
+                "codDiagnosticoPrincipal": "z008",
+                "codDiagnosticoPrincipalCIE11": null,
+                "nomCodDiagnosticoPrincipalCIE11": null,
+                "codDiagnosticoRelacionado": "z000",
+                "codDiagnosticoRelacionadoCIE11": null,
+                "nomCodDiagnosticoRelacionadoCIE11": null,
+                "tipoMedicamento": "01",
+                "codTecnologiaSalud": "19950404-1",
+                "nomTecnologiaSalud": "ACETAMINOFEN (500 MG) TAB",
+                "concentracionMedicamento": 500,
+                "unidadMedida": 168,
+                "formaFarmaceutica": "TABLETA",
+                "unidadMinDispensa": 150,
+                "cantidadMedicamento": 150,
+                "diasTratamiento": 30,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitMedicamento": 1500,
+                "vrDispensacion": 0,
+                "vrServicio": 225000,
+                "conceptoRecaudo": "02",
+                "valorPagoModerador": 3000,
+                "numFEVPagoModerador": null,
+                "consecutivo": 1,
+                "codigoVIDA": null
+              },
+              {
+                "codPrestador": "130018500201",
+                "idMIPRES": "SSC123",
+                "fechaDispensAdmon": "2026-09-02 16:59",
+                "codDiagnosticoPrincipal": "e11x",
+                "codDiagnosticoPrincipalCIE11": null,
+                "nomCodDiagnosticoPrincipalCIE11": null,
+                "codDiagnosticoRelacionado": "Z008",
+                "codDiagnosticoRelacionadoCIE11": null,
+                "nomCodDiagnosticoRelacionadoCIE11": null,
+                "tipoMedicamento": "01",
+                "codTecnologiaSalud": "12345-7",
+                "nomTecnologiaSalud": "JARABE 'NIÑOS' = \"DULCE\" \\ <B&C>",
+                "concentracionMedicamento": 0,
+                "unidadMedida": 0,
+                "formaFarmaceutica": "NA",
+                "unidadMinDispensa": 1,
+                "cantidadMedicamento": 1,
+                "diasTratamiento": 30,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitMedicamento": 1234,
+                "vrDispensacion": 0,
+                "vrServicio": 1234,
+                "conceptoRecaudo": null,
+                "valorPagoModerador": 1234,
+                "numFEVPagoModerador": "FEV-1",
+                "consecutivo": 2,
+                "codigoVIDA": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected": "cases/full.json"
+  },
+  {
+    "name": "only_otros_servicios",
+    "input": {
+      "numDocumentoIdObligado": "806011811",
+      "numFactura": "FVS1000002",
+      "tipoNota": null,
+      "numNota": null,
+      "usuarios": [
+        {
+          "tipoDocumentoIdentificacion": "TI",
+          "numDocumentoIdentificacion": "900000002",
+          "tipoUsuario": "04",
+          "fechaNacimiento": "2010-05-05",
+          "codSexo": "M",
+          "codPaisResidencia": "031",
+          "codMunicipioResidencia": "13430",
+          "codZonaTerritorialResidencia": "01",
+          "incapacidad": "NO",
+          "consecutivo": 1,
+          "codPaisOrigen": "031",
+          "registroSIRAS": null,
+          "servicios": {
+            "otrosServicios": [
+              {
+                "codPrestador": "130018500201",
+                "numAutorizacion": "",
+                "idMIPRES": null,
+                "fechaSuministroTecnologia": "2026-09-04 08:00",
+                "tipoOS": "01",
+                "codTecnologiaSalud": "OS-1",
+                "nomTecnologiaSalud": "PAÑAL ADULTO",
+                "cantidadOS": 30,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitOS": 900,
+                "vrDispensacion": 0,
+                "vrServicio": 27000,
+                "conceptoRecaudo": "05",
+                "valorPagoModerador": 0,
+                "numFEVPagoModerador": null,
+                "codigoVIDA": null,
+                "consecutivo": 1
+              }
+            ],
+            "medicamentos": null
+          }
+        }
+      ]
+    },
+    "expected": "cases/only_otros_servicios.json"
+  },
+  {
+    "name": "only_medicamentos_with_notes",
+    "input": {
+      "numDocumentoIdObligado": "806011811",
+      "numFactura": "FVS1000003",
+      "tipoNota": "NA",
+      "numNota": "NA-7",
+      "usuarios": [
+        {
+          "tipoDocumentoIdentificacion": "RC",
+          "numDocumentoIdentificacion": "900000003",
+          "tipoUsuario": "04",
+          "fechaNacimiento": "2020-12-31",
+          "codSexo": "I",
+          "codPaisResidencia": "031",
+          "codMunicipioResidencia": "13001",
+          "codZonaTerritorialResidencia": "02",
+          "incapacidad": "NO",
+          "consecutivo": 1,
+          "codPaisOrigen": "031",
+          "registroSIRAS": "SIRAS-1",
+          "servicios": {
+            "otrosServicios": null,
+            "medicamentos": [
+              {
+                "codPrestador": "130018500201",
+                "idMIPRES": null,
+                "fechaDispensAdmon": "2026-09-05 09:09",
+                "codDiagnosticoPrincipal": "",
+                "codDiagnosticoPrincipalCIE11": null,
+                "nomCodDiagnosticoPrincipalCIE11": null,
+                "codDiagnosticoRelacionado": "Z008",
+                "codDiagnosticoRelacionadoCIE11": null,
+                "nomCodDiagnosticoRelacionadoCIE11": null,
+                "tipoMedicamento": "01",
+                "codTecnologiaSalud": "CUM-3",
+                "nomTecnologiaSalud": "",
+                "concentracionMedicamento": 10,
+                "unidadMedida": 7,
+                "formaFarmaceutica": "CAPSULA",
+                "unidadMinDispensa": 99,
+                "cantidadMedicamento": 2,
+                "diasTratamiento": 30,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitMedicamento": 0,
+                "vrDispensacion": 0,
+                "vrServicio": 0,
+                "conceptoRecaudo": "05",
+                "valorPagoModerador": 0,
+                "numFEVPagoModerador": null,
+                "consecutivo": 1,
+                "codigoVIDA": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected": "cases/only_medicamentos_with_notes.json"
+  },
+  {
+    "name": "two_users_empty_list",
+    "input": {
+      "numDocumentoIdObligado": "806011811",
+      "numFactura": "FVS1000004",
+      "tipoNota": null,
+      "numNota": null,
+      "usuarios": [
+        {
+          "tipoDocumentoIdentificacion": "CC",
+          "numDocumentoIdentificacion": "900000004",
+          "tipoUsuario": "01",
+          "fechaNacimiento": "1970-07-07",
+          "codSexo": "M",
+          "codPaisResidencia": "031",
+          "codMunicipioResidencia": "13001",
+          "codZonaTerritorialResidencia": "02",
+          "incapacidad": "NO",
+          "consecutivo": 1,
+          "codPaisOrigen": "031",
+          "registroSIRAS": null,
+          "servicios": {
+            "otrosServicios": [
+              {
+                "codPrestador": "130018500201",
+                "numAutorizacion": "",
+                "idMIPRES": "",
+                "fechaSuministroTecnologia": "2026-09-06 12:00",
+                "tipoOS": "01",
+                "codTecnologiaSalud": "OS-4",
+                "nomTecnologiaSalud": "ITEM",
+                "cantidadOS": 1,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitOS": 1,
+                "vrDispensacion": 0,
+                "vrServicio": 1,
+                "conceptoRecaudo": "05",
+                "valorPagoModerador": 0,
+                "numFEVPagoModerador": null,
+                "codigoVIDA": null,
+                "consecutivo": 1
+              }
+            ],
+            "medicamentos": []
+          }
+        },
+        {
+          "tipoDocumentoIdentificacion": "CE",
+          "numDocumentoIdentificacion": "900000005",
+          "tipoUsuario": "04",
+          "fechaNacimiento": "1985-02-03",
+          "codSexo": "F",
+          "codPaisResidencia": "031",
+          "codMunicipioResidencia": "13001",
+          "codZonaTerritorialResidencia": "01",
+          "incapacidad": "NO",
+          "consecutivo": 1,
+          "codPaisOrigen": "031",
+          "registroSIRAS": null,
+          "servicios": {
+            "otrosServicios": null,
+            "medicamentos": [
+              {
+                "codPrestador": "130018500201",
+                "idMIPRES": "777",
+                "fechaDispensAdmon": "2026-09-06 13:00",
+                "codDiagnosticoPrincipal": "A01",
+                "codDiagnosticoPrincipalCIE11": null,
+                "nomCodDiagnosticoPrincipalCIE11": null,
+                "codDiagnosticoRelacionado": "A01",
+                "codDiagnosticoRelacionadoCIE11": null,
+                "nomCodDiagnosticoRelacionadoCIE11": null,
+                "tipoMedicamento": "01",
+                "codTecnologiaSalud": "CUM-5",
+                "nomTecnologiaSalud": "X",
+                "concentracionMedicamento": -1,
+                "unidadMedida": 2147483647,
+                "formaFarmaceutica": "NA",
+                "unidadMinDispensa": 1,
+                "cantidadMedicamento": 1,
+                "diasTratamiento": 30,
+                "tipoDocumentoIdentificacion": "CC",
+                "numDocumentoIdentificacion": "11111111",
+                "vrUnitMedicamento": 1,
+                "vrDispensacion": 0,
+                "vrServicio": 1,
+                "conceptoRecaudo": "05",
+                "valorPagoModerador": 0,
+                "numFEVPagoModerador": null,
+                "consecutivo": 1,
+                "codigoVIDA": null
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "expected": "cases/two_users_empty_list.json"
+  }
+]

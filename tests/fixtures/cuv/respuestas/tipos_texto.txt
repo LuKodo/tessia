@@ -1,0 +1,10 @@
+{
+  "ResultState": true,
+  "ProcesoId": 77,
+  "NumFactura": "5",
+  "CodigoUnicoValidacion": "0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccccc0cccc",
+  "CodigoUnicoValidacionToShow": null,
+  "FechaRadicacion": null,
+  "RutaArchivos": null,
+  "ResultadosValidacion": []
+}
