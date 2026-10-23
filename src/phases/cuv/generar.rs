@@ -316,6 +316,7 @@ fn submit(run: &Run<'_>, target: &Target, item: SendItem) -> Result<Option<Proce
             }
             let token_failed = err.is_token();
             run.tally.record(token_failed);
+            tracing::warn!(invoice = %inv, token_failed, error = %err, "CargarFevRips failed");
             let msg = if token_failed {
                 "Error: Token vacío"
             } else {

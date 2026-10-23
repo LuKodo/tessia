@@ -285,6 +285,14 @@ impl Shared {
                 Ok(token) => return Ok(token),
                 Err(failure) => failure,
             };
+            tracing::warn!(
+                attempt = tries,
+                of = attempts,
+                retry = failure.retry,
+                host = %self.host(),
+                error = %failure.message,
+                "SISPRO login failed"
+            );
             if !failure.retry {
                 return Err(failure.message);
             }

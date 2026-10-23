@@ -50,6 +50,89 @@ struct PinVerifier {
     algorithms: WebPkiSupportedAlgorithms,
 }
 
+impl PinVerifier {
+    /// Checks the handshake signature against the public key of the pinned
+    /// certificate. The key is read straight from the DER instead of through
+    /// webpki, which refuses the X.509 v1 certificates older servers present.
+    fn verify_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        let key = subject_public_key(cert.as_ref()).ok_or_else(|| {
+            Error::General("no se pudo leer la clave publica del certificado".into())
+        })?;
+        let algorithms = self
+            .algorithms
+            .mapping
+            .iter()
+            .filter(|(scheme, _)| *scheme == dss.scheme)
+            .flat_map(|(_, algorithms)| algorithms.iter());
+        for algorithm in algorithms {
+            if algorithm
+                .verify_signature(key, message, dss.signature())
+                .is_ok()
+            {
+                return Ok(HandshakeSignatureValid::assertion());
+            }
+        }
+        Err(Error::General(
+            "la firma del handshake no coincide con la clave del certificado".into(),
+        ))
+    }
+}
+
+/// TLS 1.3 forbids the PKCS#1 v1.5 and SHA-1 signature schemes.
+fn tls13_scheme(scheme: SignatureScheme) -> bool {
+    !matches!(
+        scheme,
+        SignatureScheme::RSA_PKCS1_SHA1
+            | SignatureScheme::ECDSA_SHA1_Legacy
+            | SignatureScheme::RSA_PKCS1_SHA256
+            | SignatureScheme::RSA_PKCS1_SHA384
+            | SignatureScheme::RSA_PKCS1_SHA512
+    )
+}
+
+/// One DER element: its tag, its content and what follows it.
+fn der_element(bytes: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = bytes.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (len, rest) = if first < 0x80 {
+        (usize::from(first), rest)
+    } else {
+        let count = usize::from(first & 0x7f);
+        if count == 0 || count > 4 || rest.len() < count {
+            return None;
+        }
+        let len = rest[..count]
+            .iter()
+            .fold(0usize, |acc, b| (acc << 8) | usize::from(*b));
+        (len, &rest[count..])
+    };
+    (rest.len() >= len).then(|| (tag, &rest[..len], &rest[len..]))
+}
+
+/// The `subjectPublicKey` bits of a certificate (v1 or v3): the key material
+/// the signature algorithms verify against.
+fn subject_public_key(cert: &[u8]) -> Option<&[u8]> {
+    let (_, certificate, _) = der_element(cert)?;
+    let (_, mut tbs, _) = der_element(certificate)?;
+    let (tag, _, after) = der_element(tbs)?;
+    if tag == 0xA0 {
+        tbs = after; // explicit [0] version (absent in v1)
+    }
+    // serial, signature algorithm, issuer, validity, subject
+    for _ in 0..5 {
+        tbs = der_element(tbs)?.2;
+    }
+    let (_, spki, _) = der_element(tbs)?;
+    let (_, _algorithm, rest) = der_element(spki)?;
+    let (tag, bits, _) = der_element(rest)?;
+    (tag == 0x03).then(|| bits.split_first().map(|(_, key)| key))?
+}
+
 impl ServerCertVerifier for PinVerifier {
     fn verify_server_cert(
         &self,
@@ -75,7 +158,7 @@ impl ServerCertVerifier for PinVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.algorithms)
+        self.verify_signature(message, cert, dss)
     }
 
     fn verify_tls13_signature(
@@ -84,7 +167,12 @@ impl ServerCertVerifier for PinVerifier {
         cert: &CertificateDer<'_>,
         dss: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.algorithms)
+        if !tls13_scheme(dss.scheme) {
+            return Err(Error::General(
+                "firma del handshake con un esquema no valido para TLS 1.3".into(),
+            ));
+        }
+        self.verify_signature(message, cert, dss)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
@@ -138,6 +226,48 @@ pub fn build_sispro_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        if content.len() < 0x80 {
+            out.push(content.len() as u8);
+        } else {
+            out.extend([0x82, (content.len() >> 8) as u8, content.len() as u8]);
+        }
+        out.extend(content);
+        out
+    }
+
+    fn certificate(with_version: bool, key: &[u8]) -> Vec<u8> {
+        let mut tbs = Vec::new();
+        if with_version {
+            tbs.extend(tlv(0xA0, &tlv(0x02, &[2])));
+        }
+        tbs.extend(tlv(0x02, &[1])); // serial
+        tbs.extend(tlv(0x30, &[])); // signature algorithm
+        tbs.extend(tlv(0x30, &[])); // issuer
+        tbs.extend(tlv(0x30, &[])); // validity
+        tbs.extend(tlv(0x30, &[])); // subject
+        let mut bits = vec![0u8];
+        bits.extend(key);
+        let mut spki = tlv(0x30, &[]);
+        spki.extend(tlv(0x03, &bits));
+        tbs.extend(tlv(0x30, &spki));
+        let mut cert = tlv(0x30, &tbs);
+        cert.extend(tlv(0x30, &[])); // outer algorithm (ignored)
+        tlv(0x30, &cert)
+    }
+
+    #[test]
+    fn the_public_key_is_read_from_v1_and_v3_certificates() {
+        let key: Vec<u8> = (0..200u8).collect();
+        for with_version in [false, true] {
+            let der = certificate(with_version, &key);
+            assert_eq!(subject_public_key(&der), Some(key.as_slice()));
+        }
+        assert_eq!(subject_public_key(&[0x30, 0x02, 0x01]), None);
+        assert_eq!(subject_public_key(&[]), None);
+    }
 
     #[test]
     fn pins_accept_openssl_fingerprints_and_plain_hex() {
