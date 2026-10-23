@@ -20,7 +20,7 @@ use tessia::phases::proceso::{Events, RunConfig};
 /// tests that run jobs take turns.
 static SERIAL: Mutex<()> = Mutex::new(());
 
-type ProcesoFake = Arc<dyn Fn(&RunConfig, &Events) -> Result<()> + Send + Sync>;
+type ProcesoFake = Arc<dyn Fn(&AppContext, &RunConfig, &Events) -> Result<()> + Send + Sync>;
 type DownloadFake = Arc<dyn Fn(NaiveDate, NaiveDate) -> Result<()> + Send + Sync>;
 type ConciliarFake = Arc<dyn Fn(&PhaseRequest) -> Result<()> + Send + Sync>;
 
@@ -35,7 +35,7 @@ pub struct Fakes {
 impl Fakes {
     pub fn proceso(
         mut self,
-        run: impl Fn(&RunConfig, &Events) -> Result<()> + Send + Sync + 'static,
+        run: impl Fn(&AppContext, &RunConfig, &Events) -> Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.proceso = Some(Arc::new(run));
         self
@@ -109,9 +109,9 @@ pub fn runner(
     let mut backend = JobBackend::real().quiet();
     let record = calls.clone();
     let proceso = fakes.proceso.clone();
-    backend.proceso = Arc::new(move |_, cfg, events| {
+    backend.proceso = Arc::new(move |ctx, cfg, events| {
         record.proceso.lock().expect("calls").push(cfg.clone());
-        proceso.as_ref().map_or(Ok(()), |run| run(cfg, events))
+        proceso.as_ref().map_or(Ok(()), |run| run(ctx, cfg, events))
     });
     let record = calls.clone();
     let download = fakes.download.clone();
