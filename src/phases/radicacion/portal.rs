@@ -8,6 +8,7 @@
 //! the radicación.
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -16,8 +17,10 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Int4, Nullable, Text, Timestamptz};
+use regex::Regex;
 
 use super::api::ApiError;
+use crate::context::AppContext;
 use crate::db::{DbPool, DbResult};
 use crate::domain::normalize_invoice;
 
@@ -30,6 +33,18 @@ diesel::table! {
         tipo -> Text,
         campo -> Text,
         detalle -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
+    portal_hallazgo (codigo) {
+        codigo -> Text,
+        detalle -> Nullable<Text>,
+        genera_glosa -> Bool,
+        devolucion -> Bool,
+        descripcion -> Nullable<Text>,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -71,6 +86,34 @@ pub struct Finding {
     pub kind: String,
     pub field: String,
     pub detail: String,
+}
+
+/// One entry of the catalog of portal findings (`portal_hallazgo`): the code
+/// and detail come from the stored findings, the other three are edited by the
+/// user.
+#[derive(Debug, Clone, Default, PartialEq, Eq, QueryableByName)]
+pub struct CatalogItem {
+    #[diesel(sql_type = Text)]
+    pub code: String,
+    #[diesel(sql_type = Nullable<Text>)]
+    detail: Option<String>,
+    #[diesel(sql_type = Bool)]
+    pub generates_glosa: bool,
+    /// The payer returns the invoice because of this finding.
+    #[diesel(sql_type = Bool)]
+    pub returns: bool,
+    #[diesel(sql_type = Nullable<Text>)]
+    description: Option<String>,
+}
+
+impl CatalogItem {
+    pub fn detail(&self) -> &str {
+        self.detail.as_deref().unwrap_or_default()
+    }
+
+    pub fn description(&self) -> &str {
+        self.description.as_deref().unwrap_or_default()
+    }
 }
 
 /// What the portal reported at one query, ready to be stored.
@@ -271,6 +314,12 @@ const HEADER_SELECT: &str = "SELECT estado, remision, fecha_cargue, fecha_cargue
 /// Rows of one multi-row INSERT of findings.
 const FINDINGS_BATCH: usize = 200;
 
+/// Longest finding code kept in the catalog (characters).
+const MAX_CODE_CHARS: usize = 100;
+
+const CATALOG_COLUMNS: &str = "codigo AS code, detalle AS detail, genera_glosa AS generates_glosa, \
+ devolucion AS returns, descripcion AS description";
+
 fn non_empty(text: &str) -> Option<&str> {
     (!text.is_empty()).then_some(text)
 }
@@ -346,7 +395,45 @@ impl PortalStore {
                     .collect();
                 diesel::insert_into(d::table).values(&rows).execute(conn)?;
             }
-            Ok(())
+            register_catalog(conn, &snapshot.findings)
+        })
+    }
+
+    /// The catalog of portal findings ordered by code.
+    pub fn catalog(&self) -> DbResult<Vec<CatalogItem>> {
+        self.pool.run("list findings catalog", |conn| {
+            Ok(diesel::sql_query(format!(
+                "SELECT {CATALOG_COLUMNS} FROM portal_hallazgo ORDER BY codigo COLLATE \"C\""
+            ))
+            .load::<CatalogItem>(conn)?)
+        })
+    }
+
+    /// Sets `genera_glosa` and `descripcion` (stored trimmed, empty as NULL) of
+    /// an existing code; `devolucion == None` keeps the stored value, so a
+    /// client that does not know the field never resets it. Returns the stored
+    /// entry, or `None` when the code is not in the catalog (entries are only
+    /// created by the portal queries).
+    pub fn update_catalog(
+        &self,
+        code: &str,
+        generates_glosa: bool,
+        returns: Option<bool>,
+        description: &str,
+    ) -> DbResult<Option<CatalogItem>> {
+        let description = non_empty(description.trim());
+        self.pool.run("update findings catalog", |conn| {
+            Ok(diesel::sql_query(format!(
+                "UPDATE portal_hallazgo SET genera_glosa = $1, descripcion = $2, \
+                 devolucion = COALESCE($3, devolucion), updated_at = now() \
+                 WHERE codigo = $4 RETURNING {CATALOG_COLUMNS}"
+            ))
+            .bind::<Bool, _>(generates_glosa)
+            .bind::<Nullable<Text>, _>(description)
+            .bind::<Nullable<Bool>, _>(returns)
+            .bind::<Text, _>(code)
+            .get_result::<CatalogItem>(conn)
+            .optional()?)
         })
     }
 
@@ -406,6 +493,243 @@ impl PortalStore {
             }))
         })
     }
+}
+
+/// Adds the distinct, non-empty finding codes to the catalog with
+/// `ON CONFLICT DO NOTHING`, so an existing code keeps its detail, `genera_glosa`
+/// and `descripcion` (the first detail ever seen wins). Runs in the caller's
+/// transaction. Codes are inserted in ascending order, so two concurrent saves
+/// with overlapping codes take their key locks in the same order and never
+/// deadlock.
+fn register_catalog(conn: &mut PgConnection, findings: &[Finding]) -> DbResult<()> {
+    let mut first_detail: std::collections::BTreeMap<String, &str> = Default::default();
+    for f in findings {
+        let code: String = f.code.trim().chars().take(MAX_CODE_CHARS).collect();
+        if !code.is_empty() {
+            first_detail.entry(code).or_insert(f.detail.as_str());
+        }
+    }
+    let entries: Vec<(&String, &&str)> = first_detail.iter().collect();
+    use portal_hallazgo as h;
+    for part in entries.chunks(FINDINGS_BATCH) {
+        let rows: Vec<_> = part
+            .iter()
+            .map(|(code, detail)| (h::codigo.eq(code.as_str()), h::detalle.eq(Some(**detail))))
+            .collect();
+        diesel::insert_into(h::table)
+            .values(&rows)
+            .on_conflict_do_nothing()
+            .execute(conn)?;
+    }
+    Ok(())
+}
+
+/// Where a [`LookupResult`] came from.
+pub const SOURCE_DATABASE: &str = "base_de_datos";
+pub const SOURCE_PORTAL: &str = "portal";
+
+/// Shown when the portal has no row for the invoice yet.
+pub const MESSAGE_NOT_FOUND: &str = "El portal aún no tiene registro de esta factura";
+/// The `error` when no portal client can be built from the settings.
+pub const MESSAGE_NOT_CONFIGURED: &str = "Portal de Mutual Ser no configurado";
+const ERROR_PREFIX: &str = "No se pudo consultar el portal: ";
+/// Longest portal error cause shown to the user (characters).
+const MAX_CAUSE_CHARS: usize = 200;
+
+/// How long a non-final stored record is served before the portal is asked again.
+pub const DEFAULT_REFRESH: Duration = Duration::from_secs(30);
+/// Bound of the portal calls of one lookup.
+pub const DEFAULT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Tuning of [`lookup`].
+#[derive(Debug, Clone, Copy)]
+pub struct LookupOptions {
+    pub refresh: Duration,
+    pub timeout: Duration,
+}
+
+impl Default for LookupOptions {
+    fn default() -> Self {
+        Self {
+            refresh: DEFAULT_REFRESH,
+            timeout: DEFAULT_LOOKUP_TIMEOUT,
+        }
+    }
+}
+
+/// The answer of [`lookup`]: the stored or fresh snapshot plus where it came
+/// from and readable notes for the user (Go `portalcargue.Result`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LookupResult {
+    pub snapshot: Snapshot,
+    /// [`SOURCE_DATABASE`], [`SOURCE_PORTAL`] or empty when there is nothing.
+    pub source: &'static str,
+    pub message: String,
+    /// A readable portal error, never a raw dump.
+    pub error: String,
+}
+
+/// A failed portal query.
+enum QueryFailure {
+    Api(ApiError),
+    Timeout,
+}
+
+static URL_PATTERN: LazyLock<Regex> = LazyLock::new(|| pattern(r"https?://\S+"));
+static BEARER_PATTERN: LazyLock<Regex> = LazyLock::new(|| pattern(r"(?i)bearer\s+\S+"));
+static SECRET_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r#"(?i)\b(token|password|passwd|secret|authorization|api[_-]?key)\b["']?\s*[=:]\s*\S+"#)
+});
+static EMAIL_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"));
+
+fn pattern(source: &str) -> Regex {
+    Regex::new(source).unwrap_or_else(|_| unreachable!("constant regex"))
+}
+
+/// Turns a portal failure into a short readable message: URLs, tokens and
+/// e-mail addresses are masked and the cause is cut to 200 characters, so an
+/// error dump never reaches the dashboard.
+fn portal_error(failure: &QueryFailure) -> String {
+    let cause = match failure {
+        QueryFailure::Timeout => "tiempo de espera agotado".to_owned(),
+        QueryFailure::Api(err) => scrub_cause(&err.to_string()),
+    };
+    format!("{ERROR_PREFIX}{cause}")
+}
+
+fn scrub_cause(message: &str) -> String {
+    if message.trim().is_empty() {
+        return "error desconocido".to_owned();
+    }
+    let cause = URL_PATTERN.replace_all(message, "[url]");
+    let cause = BEARER_PATTERN.replace_all(&cause, "[oculto]");
+    let cause = SECRET_PATTERN.replace_all(&cause, "[oculto]");
+    let cause = EMAIL_PATTERN.replace_all(&cause, "[correo]");
+    let cause = cause.split_whitespace().collect::<Vec<_>>().join(" ");
+    if cause.chars().count() > MAX_CAUSE_CHARS {
+        let cut: String = cause.chars().take(MAX_CAUSE_CHARS - 1).collect();
+        return format!("{cut}…");
+    }
+    cause
+}
+
+/// One portal query bounded by `timeout`; on a timeout the query is abandoned
+/// (its thread ends with the HTTP client's own timeouts).
+fn fetch_bounded(
+    api: Arc<dyn PortalApi>,
+    invoice: &str,
+    prev: Option<Snapshot>,
+    now: DateTime<Utc>,
+    timeout: Duration,
+) -> Result<Snapshot, QueryFailure> {
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    let invoice = invoice.to_owned();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch(api.as_ref(), &invoice, prev.as_ref(), now));
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result.map_err(QueryFailure::Api),
+        Err(crossbeam_channel::RecvTimeoutError::Timeout) => Err(QueryFailure::Timeout),
+        Err(crossbeam_channel::RecvTimeoutError::Disconnected) => Err(QueryFailure::Api(
+            ApiError::Other("la consulta al portal terminó de forma inesperada".to_owned()),
+        )),
+    }
+}
+
+fn needs_query(
+    stored: Option<&Snapshot>,
+    force: bool,
+    now: DateTime<Utc>,
+    refresh: Duration,
+) -> bool {
+    let Some(stored) = stored else { return true };
+    if force {
+        return true;
+    }
+    if stored.is_final {
+        return false;
+    }
+    let age = stored
+        .queried_at
+        .map(|at| now.signed_duration_since(at))
+        .and_then(|d| d.to_std().ok());
+    age.is_none_or(|age| age >= refresh)
+}
+
+fn from_store(stored: Option<Snapshot>) -> LookupResult {
+    match stored {
+        Some(snapshot) => LookupResult {
+            snapshot,
+            source: SOURCE_DATABASE,
+            ..LookupResult::default()
+        },
+        None => LookupResult::default(),
+    }
+}
+
+/// The portal result of `invoice`, database first (Go `portalcargue.Service`):
+/// a stored final record is returned without calling the portal, a stored
+/// non-final one is queried again at most every `refresh`, and when nothing is
+/// stored (or `force`) the portal is queried and the answer saved. A portal
+/// failure is reported in `error` together with whatever is stored; only a
+/// store failure is an `Err`. `api` builds the portal client lazily and returns
+/// `None` when the portal is not configured.
+pub fn lookup(
+    store: &PortalStore,
+    api: impl FnOnce() -> Option<Arc<dyn PortalApi>>,
+    invoice: &str,
+    force: bool,
+    now: DateTime<Utc>,
+    options: &LookupOptions,
+) -> DbResult<LookupResult> {
+    let key = normalize_invoice(invoice);
+    let stored = store.get(&key)?;
+    if !needs_query(stored.as_ref(), force, now, options.refresh) {
+        return Ok(from_store(stored));
+    }
+    let Some(api) = api() else {
+        let mut result = from_store(stored);
+        result.error = MESSAGE_NOT_CONFIGURED.to_owned();
+        return Ok(result);
+    };
+    match fetch_bounded(api, &key, stored.clone(), now, options.timeout) {
+        Err(failure) => {
+            let mut result = from_store(stored);
+            result.error = portal_error(&failure);
+            Ok(result)
+        }
+        Ok(snapshot) if !snapshot.found => {
+            let mut result = match stored {
+                Some(_) => from_store(stored),
+                None => LookupResult {
+                    snapshot,
+                    source: SOURCE_PORTAL,
+                    ..LookupResult::default()
+                },
+            };
+            result.message = MESSAGE_NOT_FOUND.to_owned();
+            Ok(result)
+        }
+        Ok(mut snapshot) => {
+            snapshot.record.invoice = key;
+            store.save(&snapshot)?;
+            Ok(LookupResult {
+                snapshot,
+                source: SOURCE_PORTAL,
+                ..LookupResult::default()
+            })
+        }
+    }
+}
+
+/// The Mutual Ser client for on-demand portal queries, built from the
+/// `zonaser.*` settings exactly like the radicación run; `Err` when they are
+/// incomplete.
+pub fn portal_client(ctx: &AppContext) -> anyhow::Result<Arc<dyn PortalApi>> {
+    let nit = super::nit(ctx)?;
+    let client = super::build_client(ctx, &nit, None)?;
+    Ok(Arc::new(client))
 }
 
 /// Wait before each portal query of one invoice: 10 s, 15 s and 30 s, then
@@ -909,5 +1233,246 @@ mod tests {
         assert_eq!(schedule.len(), 12);
         assert_eq!(&schedule[..4], [10, 15, 30, 60].map(Duration::from_secs));
         assert_eq!(schedule.iter().sum::<Duration>(), Duration::from_secs(595));
+    }
+
+    fn found(invoice: &str, findings: Vec<Finding>) -> Snapshot {
+        Snapshot {
+            record: record(invoice, "VALIDADO_CON_ADVERTENCIA"),
+            findings,
+            found: true,
+            queries: 1,
+            ..Snapshot::default()
+        }
+    }
+
+    fn detailed(code: &str, detail: &str) -> Finding {
+        Finding {
+            detail: detail.into(),
+            ..finding(code, "ADVERTENCIA")
+        }
+    }
+
+    #[test]
+    fn save_registers_each_code_once_and_the_first_detail_wins() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found(
+                "FEV1",
+                vec![
+                    detailed(" RVC012 ", "primero"),
+                    detailed("RVC012", "segundo"),
+                    detailed("", "sin codigo"),
+                    detailed("AAA001", "otro"),
+                ],
+            ))
+            .expect("save");
+        store
+            .save(&found("FEV2", vec![detailed("RVC012", "tercero")]))
+            .expect("save again");
+        let catalog = store.catalog().expect("catalog");
+        let seen: Vec<(&str, &str)> = catalog
+            .iter()
+            .map(|c| (c.code.as_str(), c.detail()))
+            .collect();
+        assert_eq!(seen, [("AAA001", "otro"), ("RVC012", "primero")]);
+        assert!(catalog.iter().all(|c| !c.generates_glosa && !c.returns));
+        assert!(catalog.iter().all(|c| c.description().is_empty()));
+    }
+
+    #[test]
+    fn saving_again_keeps_what_the_user_edited() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "primero")]))
+            .expect("save");
+        store
+            .update_catalog("RVC012", true, Some(true), "  nota  ")
+            .expect("update")
+            .expect("exists");
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "cambiado")]))
+            .expect("save again");
+        let item = &store.catalog().expect("catalog")[0];
+        assert_eq!(
+            (
+                item.detail(),
+                item.generates_glosa,
+                item.returns,
+                item.description()
+            ),
+            ("primero", true, true, "nota")
+        );
+    }
+
+    #[test]
+    fn a_save_without_findings_or_codes_adds_nothing() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store.save(&found("FEV1", Vec::new())).expect("save");
+        store
+            .save(&found("FEV2", vec![detailed("  ", "x")]))
+            .expect("save");
+        assert!(store.catalog().expect("catalog").is_empty());
+    }
+
+    #[test]
+    fn long_codes_are_cut_to_one_hundred_characters() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed(&"A".repeat(150), "x")]))
+            .expect("save");
+        assert_eq!(store.catalog().expect("catalog")[0].code, "A".repeat(100));
+    }
+
+    #[test]
+    fn update_keeps_devolucion_when_absent_and_stores_empty_text_as_null() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found("FEV1", vec![detailed("RVC012", "d")]))
+            .expect("save");
+        let first = store
+            .update_catalog("RVC012", true, Some(true), "texto")
+            .expect("update")
+            .expect("exists");
+        assert!(first.generates_glosa && first.returns);
+        let second = store
+            .update_catalog("RVC012", false, None, "   ")
+            .expect("update")
+            .expect("exists");
+        assert!(!second.generates_glosa && second.returns, "devolucion kept");
+        assert_eq!(second.description, None, "blank text is NULL");
+        let third = store
+            .update_catalog("RVC012", false, Some(false), "")
+            .expect("update")
+            .expect("exists");
+        assert!(!third.returns);
+        assert_eq!(
+            store
+                .update_catalog("NOPE", true, None, "")
+                .expect("update"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_catalog_is_ordered_by_code() {
+        let db = TestDb::new();
+        let store = PortalStore::new(db.pool());
+        store
+            .save(&found(
+                "FEV1",
+                vec![
+                    detailed("B2", "x"),
+                    detailed("A10", "x"),
+                    detailed("A2", "x"),
+                ],
+            ))
+            .expect("save");
+        let codes: Vec<String> = store
+            .catalog()
+            .expect("catalog")
+            .into_iter()
+            .map(|c| c.code)
+            .collect();
+        assert_eq!(codes, ["A10", "A2", "B2"]);
+    }
+
+    #[test]
+    fn the_migration_seeds_the_catalog_from_the_stored_findings() {
+        let db = TestDb::new();
+        let up = include_str!("../../../migrations/2026-10-24-010000_portal_hallazgo/up.sql");
+        let seed = &up[up
+            .find("INSERT INTO portal_hallazgo")
+            .expect("seed statement")..];
+        let mut conn = db.conn();
+        diesel::sql_query(
+            "INSERT INTO portal_cargue_detalle (num_factura, orden, codigo, detalle) VALUES \
+             ('FEV1', 0, 'RVC012', 'zeta'), ('FEV2', 0, ' RVC012 ', 'alfa'), \
+             ('FEV2', 1, 'ABC1', NULL), ('FEV2', 2, '', 'sin codigo'), ('FEV2', 3, '   ', 'blank')",
+        )
+        .execute(&mut conn)
+        .expect("findings");
+        diesel::sql_query(seed).execute(&mut conn).expect("seed");
+        diesel::sql_query(seed)
+            .execute(&mut conn)
+            .expect("seed is idempotent");
+        let catalog = PortalStore::new(db.pool()).catalog().expect("catalog");
+        let seen: Vec<(&str, &str)> = catalog
+            .iter()
+            .map(|c| (c.code.as_str(), c.detail()))
+            .collect();
+        assert_eq!(seen, [("ABC1", ""), ("RVC012", "alfa")]);
+    }
+
+    #[test]
+    fn portal_errors_hide_urls_tokens_secrets_and_emails() {
+        let failure = QueryFailure::Api(ApiError::Other(
+            "post https://zonaser.example.org/api/x?token=abc failed: Bearer eyJhbGci.abc \
+             password=hunter2 api_key: K-1 user ops@example.org\n  boom"
+                .to_owned(),
+        ));
+        let message = portal_error(&failure);
+        assert_eq!(
+            message,
+            "No se pudo consultar el portal: post [url] failed: [oculto] [oculto] [oculto] user [correo] boom"
+        );
+        for secret in ["zonaser", "eyJhbGci", "hunter2", "K-1", "ops@"] {
+            assert!(!message.contains(secret), "{secret}");
+        }
+    }
+
+    #[test]
+    fn portal_errors_are_cut_to_two_hundred_characters() {
+        let long = QueryFailure::Api(ApiError::Other("ñ".repeat(500)));
+        let message = portal_error(&long);
+        let cause = message.strip_prefix(ERROR_PREFIX).expect("prefix");
+        assert_eq!(cause.chars().count(), 200);
+        assert!(cause.ends_with('…'));
+        assert_eq!(
+            portal_error(&QueryFailure::Api(ApiError::Other("  ".into()))),
+            "No se pudo consultar el portal: error desconocido"
+        );
+        assert_eq!(
+            portal_error(&QueryFailure::Timeout),
+            "No se pudo consultar el portal: tiempo de espera agotado"
+        );
+    }
+
+    #[test]
+    fn the_refresh_rule_serves_final_records_and_ages_the_others() {
+        let now = Utc::now();
+        let refresh = Duration::from_secs(30);
+        let stored = |is_final: bool, age: Option<i64>| Snapshot {
+            found: true,
+            is_final,
+            queried_at: age.map(|s| now - chrono::Duration::seconds(s)),
+            ..Snapshot::default()
+        };
+        assert!(needs_query(None, false, now, refresh), "nothing stored");
+        assert!(
+            needs_query(Some(&stored(true, Some(1))), true, now, refresh),
+            "forced"
+        );
+        assert!(
+            !needs_query(Some(&stored(true, Some(9999))), false, now, refresh),
+            "final"
+        );
+        assert!(!needs_query(
+            Some(&stored(false, Some(29))),
+            false,
+            now,
+            refresh
+        ));
+        assert!(needs_query(
+            Some(&stored(false, Some(30))),
+            false,
+            now,
+            refresh
+        ));
+        assert!(needs_query(Some(&stored(false, None)), false, now, refresh));
     }
 }

@@ -465,6 +465,15 @@ fn portal_follow_stores_the_portal_state_of_each_uploaded_rips_json() {
         (1, 0, 1)
     );
     assert_eq!(f.calls("/findDetailsByFile/f-FEV1"), 1);
+    // The followed findings feed the catalog behind `GET /api/hallazgos`.
+    let catalog = PortalStore::new(f.db.pool()).catalog().expect("catalog");
+    assert_eq!(
+        catalog
+            .iter()
+            .map(|c| (c.code.as_str(), c.detail()))
+            .collect::<Vec<_>>(),
+        [("A1", "revisar")]
+    );
 
     // Off by default: the other cargue-less run makes no portal calls.
     let f = fixture(&[("FEV1", "1000.00", "1000")]);
