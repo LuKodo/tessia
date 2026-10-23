@@ -558,8 +558,8 @@ assert_eq!(server.requests()[0].header("authorization"), None);
 From S1/S2 (scope) and S3-S6 (design):
 
 * Dry-run everywhere: `--live`, the `SI` confirmation, `internal/platform/dryrun`, `dryrun-out`, Guard lines.
-* Commands out of scope: `serve` (HTTP API, CORS, dashboard, jobs, OpenAPI), `siesa *`, `migrate retire-log`,
-  `seguimiento rebuild`, `convenio importar`, the desktop UI, the `version` command (use `--version`).
+* Commands out of scope: `serve` (HTTP server, CORS, OpenAPI; the dashboard, API and jobs are in-process via `desktop`), `siesa *`, `migrate retire-log`,
+  `seguimiento rebuild`, `convenio importar`, the `version` command (use `--version`).
 * MySQL machinery: DSN tuning, pools, `widths.go`, `lockretry.go` (replaced by `db::retry`), schema views,
   `LockConflictObserver`, MySQL `INSERT IGNORE`/`ON DUPLICATE KEY` (Postgres `ON CONFLICT`).
 * File locks (`phaselock.go`, `internal/platform/lock`, `.tessia-*.lock`): replaced by `proceso_estado`

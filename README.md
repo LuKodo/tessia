@@ -34,10 +34,17 @@ facturacion conciliar --cargue ID
 facturacion radicacion run <CARGUE> [--step 1-4 ...]   |   facturacion radicacion recheck-step2 --invoices a,b
 facturacion config check [clave...]            # which keys are set (never prints values)
 facturacion db migrate                         # idempotent, safe from several machines
+facturacion desktop                            # desktop window; also what runs with no arguments
 ```
 
 Every command accepts `--config FILE` (a `KEY=VALUE` file; also `TESSIA_CONFIG`). `--help` on any command
 shows the Spanish help.
+
+## Desktop window
+
+`facturacion` with no arguments (or only `--config`) opens the dashboard window: a wry/tao web view that
+serves the embedded UI from `tessia://localhost` and runs the API in the same process (no HTTP port). Build
+the UI bundle first with `scripts/build-desktop.sh` (needs npm); the `desktop` cargo feature is on by default.
 
 ## Configuration
 
