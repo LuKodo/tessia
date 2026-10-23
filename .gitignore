@@ -4,3 +4,5 @@
 *.env
 *.env.bak
 .DS_Store
+desktop-ui/node_modules
+desktop-ui/dist
