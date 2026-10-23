@@ -716,3 +716,28 @@ fn a_store_failure_is_a_generic_message() {
         json!({"error": "no se pudo leer el seguimiento de la factura"})
     );
 }
+
+#[test]
+fn the_shared_cache_serves_a_repeated_cargues_request_within_its_ttl() {
+    use std::sync::Arc;
+    use tessia::api::ApiState;
+    use tessia::context::AppContext;
+    use tessia::db::test_support::TestDb;
+    use tessia::jobs::JobRunner;
+    let db = TestDb::new();
+    let ctx = AppContext::for_tests(&db);
+    let jobs = Arc::new(JobRunner::with_history_dir(ctx.clone(), None));
+    let state = ApiState::new(ctx, db.pool(), jobs); // default 2.5 s cache
+    let first = get(&state, "/api/cargues", &[]);
+    store_load(
+        &db,
+        "Late.csv",
+        'a',
+        |b| b,
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-01T00:00:00Z",
+    );
+    let second = get(&state, "/api/cargues", &[]);
+    assert_eq!(first.1, second.1, "the second answer is the cached one");
+}

@@ -74,6 +74,7 @@ impl Backend {
 
     /// A backend over an existing state (tests).
     pub fn from_state(state: ApiState, assets: Arc<dyn assets::AssetSource>) -> Self {
+        state.allow_origin(protocol::app_origin());
         let state = Arc::new(state);
         let api_state = Arc::clone(&state);
         let bridge = protocol::Bridge::new(
@@ -97,8 +98,8 @@ impl Backend {
     /// cancellation belongs to `JobRunner` (see the note below).
     pub fn close(self) {
         self.bridge.close(CLOSE_WAIT);
-        // `JobRunner` has no shutdown yet (the jobs unit owns it). When it does,
-        // cancel and wait for the running job here, before `state` is dropped.
+        // Cancels the running job and waits for it before the state is dropped.
+        self.state.jobs.close();
         drop(self.state);
     }
 }

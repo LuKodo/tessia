@@ -24,7 +24,7 @@ struct Fixture {
 fn fixture() -> Fixture {
     let db = TestDb::new();
     let ctx = AppContext::for_tests(&db);
-    let jobs = Arc::new(JobRunner::new(ctx.clone()));
+    let jobs = Arc::new(JobRunner::with_history_dir(ctx.clone(), None));
     let state = ApiState::new(ctx, db.pool(), jobs);
     let ui = MemoryAssets::new()
         .with("index.html", "<!doctype html><title>Tessia</title>")

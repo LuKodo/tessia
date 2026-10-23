@@ -39,7 +39,7 @@ pub struct ApiState {
 
 impl ApiState {
     pub fn new(ctx: AppContext, pool: DbPool, jobs: Arc<JobRunner>) -> Self {
-        let instance = format!("{:032x}", rand::random::<u128>());
+        let instance = jobs.instance_id().to_string();
         Self {
             ctx,
             pool,

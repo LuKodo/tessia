@@ -57,7 +57,11 @@ impl Harness {
         let objects = Arc::new(MemoryStore::new());
         let bucket: Arc<dyn ObjectStore> = objects.clone();
         let ctx = f(AppContext::for_tests(&db).with_objects(bucket));
-        let state = ApiState::new(ctx.clone(), db.pool(), Arc::new(JobRunner::new(ctx)));
+        let state = ApiState::new(
+            ctx.clone(),
+            db.pool(),
+            Arc::new(JobRunner::with_history_dir(ctx, None)),
+        );
         Self { db, state, objects }
     }
 

@@ -1,5 +1,6 @@
 //! `facturacion`: thin entry point. All logic lives in the `tessia` library.
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 use anyhow::Result;
@@ -19,7 +20,7 @@ const EXIT_USAGE: u8 = 2;
 
 fn main() -> ExitCode {
     init_tracing();
-    let cli = match Cli::try_parse() {
+    let cli = match Cli::try_parse_from(args_with_default_command(std::env::args_os())) {
         Ok(cli) => cli,
         Err(err) => {
             let usage_error = err.use_stderr();
@@ -41,6 +42,17 @@ fn main() -> ExitCode {
     }
 }
 
+/// A double-click starts the binary with no arguments (or only `--config
+/// <file>`): that opens the desktop window, as the Go desktop build did.
+fn args_with_default_command(args: impl Iterator<Item = OsString>) -> Vec<OsString> {
+    let mut args: Vec<OsString> = args.collect();
+    let only_config = args.len() == 3 && args[1] == "--config";
+    if args.len() == 1 || only_config {
+        args.push("desktop".into());
+    }
+    args
+}
+
 fn run(cli: Cli) -> Result<()> {
     let settings = Settings::load(cli.config.as_deref())?;
     match cli.command {
@@ -59,6 +71,7 @@ fn run_phase_command(ctx: AppContext, command: Commands) -> Result<()> {
         Commands::Convenio {
             command: ConvenioCommand::Preparar(args),
         } => convenio_preparar::run(&ctx, args),
+        Commands::Desktop => tessia::desktop::run(ctx),
         Commands::Proceso(args) => proceso::run(&ctx, args),
         Commands::Diario(args) => proceso::diario::run(&ctx, args),
         Commands::Conciliar(args) => conciliar::run(&ctx, args),
@@ -81,4 +94,35 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<OsString> {
+        args_with_default_command(list.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn no_arguments_open_the_desktop_window() {
+        assert_eq!(args(&["facturacion"]), ["facturacion", "desktop"]);
+    }
+
+    #[test]
+    fn a_lone_config_flag_still_opens_the_window() {
+        assert_eq!(
+            args(&["facturacion", "--config", "tessia.env"]),
+            ["facturacion", "--config", "tessia.env", "desktop"]
+        );
+    }
+
+    #[test]
+    fn an_explicit_command_is_left_alone() {
+        assert_eq!(
+            args(&["facturacion", "db", "migrate"]),
+            ["facturacion", "db", "migrate"]
+        );
+        assert_eq!(args(&["facturacion", "--help"]), ["facturacion", "--help"]);
+    }
 }

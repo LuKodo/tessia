@@ -33,7 +33,7 @@ pub fn env_with(pairs: Vec<(&str, String)>) -> Env {
     }
     // The API's own small pool, like the real wiring.
     let pool = DbPool::connect(db.url(), 3).expect("api pool");
-    let jobs = Arc::new(JobRunner::new(ctx.clone()));
+    let jobs = Arc::new(JobRunner::with_history_dir(ctx.clone(), None));
     let state = ApiState::new(ctx, pool, jobs);
     Env { db, state }
 }

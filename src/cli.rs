@@ -52,6 +52,8 @@ pub enum Commands {
     Soporte(soporte::Args),
     /// Radicación en Mutual Ser
     Radicacion(radicacion::Args),
+    /// Abre la ventana de escritorio (la API corre dentro del mismo proceso)
+    Desktop,
     /// Configuración
     Config {
         #[command(subcommand)]

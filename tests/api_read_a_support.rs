@@ -7,10 +7,12 @@
 #![allow(dead_code)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use diesel::RunQueryDsl;
 use serde_json::Value;
+use tessia::api::cache::Cache;
 use tessia::api::{ApiState, Request};
 use tessia::context::AppContext;
 use tessia::db::test_support::TestDb;
@@ -28,7 +30,11 @@ pub struct Fixture {
 
 pub fn state_for(db: &TestDb) -> ApiState {
     let ctx = AppContext::for_tests(db);
-    ApiState::new(ctx.clone(), db.pool(), Arc::new(JobRunner::new(ctx)))
+    let jobs = Arc::new(JobRunner::with_history_dir(ctx.clone(), None));
+    let mut state = ApiState::new(ctx, db.pool(), jobs);
+    // Reads must see what a test just wrote; the shared cache has its own test.
+    state.cache = Cache::with_ttl(Duration::ZERO);
+    state
 }
 
 pub fn empty_fixture() -> Fixture {

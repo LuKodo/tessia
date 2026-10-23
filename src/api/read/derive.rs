@@ -607,11 +607,11 @@ pub fn valid_cargue_id(id: &str) -> bool {
 /// The one seam to the shared 2.5 s answer cache (`crate::api::cache`,
 /// `Cache::get_or_compute`) that `cargues`, `consulta` and `resumen` go through.
 ///
-/// The cache lands in another branch; until the parent points this function at
-/// it, the answer is computed directly. `key` identifies the answer (route plus
-/// the canonical query, see [`cache_key`]); only a 200 may be cached.
-pub fn cached(_state: &ApiState, _key: &str, compute: impl FnOnce() -> ApiResult) -> ApiResult {
-    compute()
+/// Answers through the shared 2.5 s cache with request coalescing. `key`
+/// identifies the answer (route plus the canonical query, see [`cache_key`]);
+/// only a 200 is cached.
+pub fn cached(state: &ApiState, key: &str, compute: impl FnOnce() -> ApiResult) -> ApiResult {
+    state.cache.get_or_compute(key, compute)
 }
 
 /// Cache key of a request: the route plus its query pairs in sorted order.

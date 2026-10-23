@@ -32,6 +32,7 @@ fn help_lists_every_ported_command_group() {
         "cuv",
         "soporte",
         "radicacion",
+        "desktop",
         "config",
         "db",
     ] {

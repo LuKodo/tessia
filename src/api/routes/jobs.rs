@@ -13,7 +13,6 @@ use serde_json::{Map, Value};
 use crate::api::{
     ApiState,
     errors::{ApiError, ApiResult},
-    guard,
     request::{Request, Response},
 };
 use crate::context::AppContext;
@@ -57,7 +56,6 @@ impl From<NoJobRunning> for ApiError {
 
 /// `POST /api/run`: `proceso run` over an existing cargue.
 pub fn run(state: &ApiState, req: &Request) -> ApiResult {
-    guard::check(req)?;
     let body = lenient_body(req)?;
     let cargue = string_field(&body, "Cargue")?;
     let from = string_field(&body, "From")?;
@@ -109,7 +107,6 @@ fn phase_cards(active: &Active) -> Vec<(String, String)> {
 
 /// `POST /api/download`: `convenio descargar` for a date range.
 pub fn download(state: &ApiState, req: &Request) -> ApiResult {
-    guard::check(req)?;
     let body = lenient_body(req)?;
     let desde = string_field(&body, "Desde")?;
     let hasta = string_field(&body, "Hasta")?;
@@ -137,7 +134,6 @@ pub fn download(state: &ApiState, req: &Request) -> ApiResult {
 /// `POST /api/cargues/{id}/reintentar`: `conciliar` for one invoice whose
 /// `fev_valor` is waiting for a manual review of a VALOR_DIFERENTE.
 pub fn reintentar(state: &ApiState, req: &Request) -> ApiResult {
-    guard::check(req)?;
     let invoice = retry_invoice(&req.body)?;
     if invoice.trim().is_empty() {
         return Err(ApiError::bad_request("factura requerida"));
@@ -296,8 +292,7 @@ pub fn history(state: &ApiState, _req: &Request) -> ApiResult {
 }
 
 /// `POST /api/jobs/cancel`.
-pub fn cancel(state: &ApiState, req: &Request) -> ApiResult {
-    guard::check(req)?;
+pub fn cancel(state: &ApiState, _req: &Request) -> ApiResult {
     state.jobs.cancel()?;
     Ok(Response::json(&serde_json::json!({ "ok": true })))
 }
