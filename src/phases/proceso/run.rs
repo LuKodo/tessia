@@ -190,6 +190,14 @@ fn fire_batch(
                 if Instant::now() + wait > give_up || crate::shutdown::requested() {
                     return Fired::OtherMachine(format!("{err:#}"));
                 }
+                tracing::warn!(
+                    cargue = cargue_id,
+                    invoices = batch.len(),
+                    retry_in_s = wait.as_secs(),
+                    gives_up_in_s = give_up.saturating_duration_since(Instant::now()).as_secs(),
+                    reason = %format!("{err:#}"),
+                    "radicacion batch waiting for the cargue lease"
+                );
                 std::thread::sleep(wait);
             }
             Err(err) => return Fired::Failed(format!("{err:#}")),
