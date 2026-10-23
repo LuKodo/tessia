@@ -6,6 +6,7 @@ pub mod cli;
 pub mod config;
 pub mod context;
 pub mod db;
+pub mod desktop;
 pub mod domain;
 pub mod fevxml;
 pub mod http;

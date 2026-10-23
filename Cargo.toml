@@ -16,6 +16,11 @@ path = "src/main.rs"
 # Exposes `db::test_support` (random throwaway databases) to integration tests
 # and to other crates; unit tests always have it.
 test-support = ["dep:tiny_http"]
+# The desktop window (wry/tao webview). Linux builds need the system GTK and
+# WebKitGTK development packages; a headless (server/cron) build can opt out
+# with `--no-default-features`, which keeps the pure parts of `desktop`.
+default = ["desktop"]
+desktop = ["dep:rust-embed", "dep:tao", "dep:wry", "dep:muda"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -29,8 +34,11 @@ diesel = { version = "2.3.14", features = ["postgres", "r2d2", "chrono", "serde_
 diesel_migrations = { version = "2.3.2", features = ["postgres"] }
 hex = "0.4"
 hostname = "0.4"
+http = "1"
 libc = "0.2"
 md-5 = "0.10"
+mime_guess = "2"
+percent-encoding = "2"
 # Statically builds libpq so the binary does not need a system libpq.
 pq-sys = { version = "0.7", features = ["bundled"] }
 quick-xml = "0.38"
@@ -57,8 +65,23 @@ ab_glyph = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff"] }
 lopdf = { version = "0.46", default-features = false }
 
+# desktop window: the OS Downloads folder; feature `desktop`: the webview, its
+# window loop and the UI embedded at build time.
+dirs = "7"
+rust-embed = { version = "8", features = ["debug-embed"], optional = true }
+tao = { version = "0.37", optional = true }
+wry = { version = "0.57", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Without `linux-body` WebKitGTK custom-protocol requests arrive with an empty body.
+wry = { version = "0.57", features = ["linux-body"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# tao has no menu: without an Edit menu Cmd+C / Cmd+V do not reach the webview.
+muda = { version = "0.17", optional = true }
+
 [dev-dependencies]
 # Self dependency: integration tests in tests/ get the `test-support` feature.
-tessia = { path = ".", features = ["test-support"] }
+tessia = { path = ".", default-features = false, features = ["test-support"] }
 tempfile = "3"
 tiny_http = "0.12"
