@@ -58,7 +58,7 @@ fn health_lists_the_services_in_order_with_their_state() {
             "SISPRO",
             "ZonaSer · radicación",
             "PortalMutualser · autorizaciones",
-            "MySQL",
+            "PostgreSQL",
             "Redis · nota técnica",
             "Almacenamiento · cargues",
         ]
@@ -366,4 +366,321 @@ fn put_over_the_json_limit_is_413() {
         (resp.status, error_of(&resp).as_str()),
         (413, "cuerpo demasiado grande")
     );
+}
+
+// --- manual upload ------------------------------------------------------------------
+
+const HEADER: &str = "nit|plan|subplan|factura|tipo de identificacion|no. documento|no. formula|fecha|plu|articulo|cantidad|vlr. unitario|vlr. total|cuota|mipres|cum";
+
+fn row(invoice: &str) -> String {
+    format!(
+        "900000001|PLAN|EVENTO POS|{invoice}|CC|1001||2026-10-21 10:00:00|20010_01|PRODUCTO|1|1500|1500|0||19950404-1"
+    )
+}
+
+fn valid_csv() -> String {
+    format!("{HEADER}\n{}\n{}\n", row("EVS-1"), row("EVS-2"))
+}
+
+const BOUNDARY: &str = "----tessiaTestBoundary";
+
+fn multipart(parts: &[(&str, Option<&str>, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, file, data) in parts {
+        out.extend(
+            format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"").bytes(),
+        );
+        if let Some(file) = file {
+            out.extend(format!("; filename=\"{file}\"\r\nContent-Type: text/csv").bytes());
+        }
+        out.extend(b"\r\n\r\n");
+        out.extend(*data);
+        out.extend(b"\r\n");
+    }
+    out.extend(format!("--{BOUNDARY}--\r\n").bytes());
+    out
+}
+
+fn upload_request(body: Vec<u8>) -> Request {
+    Request::new("POST", "/api/convenio/upload")
+        .with_header(
+            "Content-Type",
+            &format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .with_body(body)
+}
+
+fn upload_csv(h: &Harness, file_name: &str, csv: &[u8]) -> tessia::api::Response {
+    h.send(upload_request(multipart(&[("csv", Some(file_name), csv)])))
+}
+
+fn cargues(h: &Harness) -> Vec<tessia::stores::cargues::Cargue> {
+    let since = chrono::DateTime::from_timestamp(0, 0).expect("epoch");
+    h.state.ctx.cargues().recent(since, 100).expect("recent")
+}
+
+fn assert_nothing_stored(h: &Harness) {
+    assert!(cargues(h).is_empty(), "no cargue registered");
+    assert!(h.objects.is_empty(), "no object published");
+}
+
+fn is_manual_id(id: &str) -> bool {
+    let Some(rest) = id.strip_prefix("Manual_") else {
+        return false;
+    };
+    let Some((stamp, hash)) = rest.split_once("Z_") else {
+        return false;
+    };
+    let (date, time) = stamp.split_once('T').unwrap_or_default();
+    date.len() == 8
+        && time.len() == 15
+        && stamp.bytes().all(|b| b.is_ascii_digit() || b == b'T')
+        && hash.len() == 12
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+#[test]
+fn a_valid_csv_becomes_a_manual_cargue_with_its_csv_published() {
+    use sha2::{Digest, Sha256};
+    let h = Harness::new();
+    let csv = valid_csv();
+    let resp = upload_csv(&h, "mi convenio.csv", csv.as_bytes());
+    assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
+    let body = json(&resp);
+    assert_eq!(body["ok"], true);
+    let id = body["cargue"].as_str().expect("cargue").to_owned();
+    assert!(is_manual_id(&id), "{id}");
+    assert_eq!(body["file_name"], format!("{id}.csv"));
+    assert_eq!(body.as_object().map(|o| o.len()), Some(3));
+
+    let sha = hex::encode(Sha256::digest(csv.as_bytes()));
+    assert!(id.ends_with(&sha[..12]));
+    let stored = h
+        .state
+        .ctx
+        .cargues()
+        .newest(&id)
+        .expect("newest")
+        .expect("row");
+    assert_eq!(stored.sha256, sha);
+    assert_eq!(stored.name, format!("{id}.csv"));
+    assert_eq!(stored.origin().as_str(), "manual");
+
+    assert_eq!(h.objects.keys(), vec![format!("{id}__{id}.csv")]);
+    let published = h
+        .state
+        .ctx
+        .artifacts()
+        .fetch_bytes(&id, &format!("{id}.csv"))
+        .expect("fetch");
+    assert_eq!(published, csv.as_bytes());
+}
+
+#[test]
+fn the_same_bytes_uploaded_twice_make_two_manual_cargues() {
+    let h = Harness::new();
+    let first = json(&upload_csv(&h, "a.csv", valid_csv().as_bytes()));
+    let second = json(&upload_csv(&h, "a.csv", valid_csv().as_bytes()));
+    assert_ne!(first["cargue"], second["cargue"]);
+    assert_eq!(cargues(&h).len(), 2);
+}
+
+#[test]
+fn the_extension_is_checked_case_insensitively_and_paths_are_dropped() {
+    let h = Harness::new();
+    for name in [
+        "DATOS.CSV",
+        "C:\\Users\\x\\datos.csv",
+        "/tmp/a/datos.Csv",
+        ".csv",
+    ] {
+        assert_eq!(
+            upload_csv(&h, name, valid_csv().as_bytes()).status,
+            200,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn bom_and_crlf_csv_files_are_accepted() {
+    let h = Harness::new();
+    let csv = format!("\u{feff}{}", valid_csv().replace('\n', "\r\n"));
+    assert_eq!(upload_csv(&h, "a.csv", csv.as_bytes()).status, 200);
+}
+
+#[test]
+fn anything_but_one_csv_file_field_is_refused() {
+    let h = Harness::new();
+    let csv = valid_csv();
+    let data = csv.as_bytes();
+    let bodies = [
+        ("no parts", multipart(&[])),
+        (
+            "wrong field name",
+            multipart(&[("file", Some("a.csv"), data)]),
+        ),
+        ("value, not a file", multipart(&[("csv", None, data)])),
+        ("empty file name", multipart(&[("csv", Some(""), data)])),
+        (
+            "wrong extension",
+            multipart(&[("csv", Some("a.xlsx"), data)]),
+        ),
+        ("no extension", multipart(&[("csv", Some("csv"), data)])),
+        (
+            "two csv files",
+            multipart(&[("csv", Some("a.csv"), data), ("csv", Some("b.csv"), data)]),
+        ),
+        (
+            "extra file field",
+            multipart(&[("csv", Some("a.csv"), data), ("otro", Some("b.csv"), data)]),
+        ),
+    ];
+    for (label, body) in bodies {
+        let resp = h.send(upload_request(body));
+        assert_eq!(resp.status, 400, "{label}");
+        assert_eq!(
+            error_of(&resp),
+            "Selecciona un único archivo CSV.",
+            "{label}"
+        );
+    }
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn plain_value_fields_next_to_the_file_are_ignored() {
+    let h = Harness::new();
+    let csv = valid_csv();
+    let body = multipart(&[
+        ("desde", None, b"2026-10-01"),
+        ("csv", Some("a.csv"), csv.as_bytes()),
+    ]);
+    assert_eq!(h.send(upload_request(body)).status, 200);
+}
+
+#[test]
+fn a_request_that_is_not_multipart_is_400() {
+    let h = Harness::new();
+    let cases = [
+        Request::new("POST", "/api/convenio/upload").with_body(valid_csv()),
+        Request::new("POST", "/api/convenio/upload")
+            .with_header("Content-Type", "text/csv")
+            .with_body(valid_csv()),
+        Request::new("POST", "/api/convenio/upload")
+            .with_header("Content-Type", "multipart/form-data")
+            .with_body(valid_csv()),
+        Request::new("POST", "/api/convenio/upload")
+            .with_header("Content-Type", &format!("multipart/form-data; boundary={BOUNDARY}"))
+            .with_body("--not the boundary\r\n"),
+        // The closing delimiter is missing.
+        Request::new("POST", "/api/convenio/upload")
+            .with_header("Content-Type", &format!("multipart/form-data; boundary={BOUNDARY}"))
+            .with_body(format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"csv\"; filename=\"a.csv\"\r\n\r\ndata")),
+    ];
+    for req in cases {
+        let resp = h.send(req);
+        assert_eq!(resp.status, 400);
+        assert_eq!(error_of(&resp), "Solicitud multipart inválida.");
+    }
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn an_invalid_or_empty_csv_is_refused() {
+    let h = Harness::new();
+    let cases: [(&str, String); 5] = [
+        ("empty file", String::new()),
+        ("not a csv", "esto no es un convenio".to_owned()),
+        ("missing columns", "nit|factura\n1|A\n".to_owned()),
+        ("header only", format!("{HEADER}\n")),
+        ("blank lines only", format!("{HEADER}\n\n\n")),
+    ];
+    for (label, csv) in cases {
+        let resp = upload_csv(&h, "a.csv", csv.as_bytes());
+        assert_eq!(resp.status, 400, "{label}");
+        assert_eq!(
+            error_of(&resp),
+            "El CSV de convenio es inválido o no contiene registros válidos.",
+            "{label}"
+        );
+    }
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn a_csv_with_a_malformed_row_is_refused_whole() {
+    let h = Harness::new();
+    let csv = format!(
+        "{HEADER}\n{}\n900000001|PLAN|solo tres campos\n",
+        row("EVS-1")
+    );
+    let resp = upload_csv(&h, "a.csv", csv.as_bytes());
+    assert_eq!(resp.status, 400);
+    assert_eq!(
+        error_of(&resp),
+        "El CSV contiene filas con columnas incompletas o mal formadas."
+    );
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn files_above_32_mib_are_413_and_exactly_32_mib_is_not() {
+    let h = Harness::new();
+    let prefix = format!("{HEADER}\n{}\n", row("EVS-1"));
+    let pad = |total: usize| {
+        let mut data = prefix.clone().into_bytes();
+        // Blank lines are skipped by the reader, so the CSV stays valid.
+        data.resize(total, b'\n');
+        data
+    };
+    let over = pad((32 << 20) + 1);
+    let resp = upload_csv(&h, "big.csv", &over);
+    assert_eq!(resp.status, 413);
+    assert_eq!(error_of(&resp), "El CSV supera el límite de 32 MiB.");
+    assert_nothing_stored(&h);
+
+    let exact = pad(32 << 20);
+    let resp = upload_csv(&h, "big.csv", &exact);
+    assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
+}
+
+#[test]
+fn a_body_above_the_framing_allowance_is_413_before_parsing() {
+    let h = Harness::new();
+    let resp = h.send(upload_request(vec![b'x'; (32 << 20) + (64 << 10) + 1]));
+    assert_eq!(
+        (resp.status, error_of(&resp).as_str()),
+        (413, "El CSV supera el límite de 32 MiB.")
+    );
+}
+
+#[test]
+fn an_upload_from_another_origin_stores_nothing() {
+    let h = Harness::new();
+    let resp = h.send(
+        upload_request(multipart(&[("csv", Some("a.csv"), valid_csv().as_bytes())]))
+            .with_header("Origin", "https://evil.example"),
+    );
+    assert_eq!(resp.status, 403);
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn the_upload_route_only_accepts_post() {
+    let h = Harness::new();
+    let resp = h.get("/api/convenio/upload");
+    assert_eq!((resp.status, resp.header("Allow")), (405, Some("POST")));
+}
+
+#[test]
+fn a_failing_bucket_is_a_generic_500_and_registers_no_cargue() {
+    let h = Harness::with_context(|ctx| ctx.with_objects(Arc::new(BrokenBucket)));
+    let resp = upload_csv(&h, "a.csv", valid_csv().as_bytes());
+    assert_eq!(resp.status, 500);
+    assert_eq!(error_of(&resp), "No se pudo guardar el CSV.");
+    assert!(!String::from_utf8_lossy(&resp.body).contains("down"));
+    assert!(cargues(&h).is_empty());
 }

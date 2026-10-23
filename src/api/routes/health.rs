@@ -26,10 +26,9 @@ use crate::db::DbPool;
 pub const HEALTH_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Name of the database row. The UI special-cases this exact name to word its
-/// detail line (`ping` instead of `alcance TCP`, `health-model.ts`), so it keeps
-/// the Go name even though the database is Postgres. Renaming it to
-/// `PostgreSQL` is this constant plus `s.nombre === "MySQL"` in that file.
-pub const DATABASE_CHECK_NAME: &str = "MySQL";
+/// detail line (`ping` instead of `alcance TCP`, `health-model.ts`); the UI
+/// port compares against `PostgreSQL`.
+pub const DATABASE_CHECK_NAME: &str = "PostgreSQL";
 
 pub const REDIS_CHECK_NAME: &str = "Redis · nota técnica";
 pub const OBJECTS_CHECK_NAME: &str = "Almacenamiento · cargues";
