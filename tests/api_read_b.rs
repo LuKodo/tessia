@@ -377,3 +377,297 @@ fn the_informe_rejects_a_bad_format_and_unknown_cargues() {
         405
     );
 }
+
+// ---- radicadas -------------------------------------------------------------
+
+use chrono::{Local, TimeZone, Utc};
+use tessia::domain::dataset::Line;
+use tessia::domain::dataset::test_support::sample_line;
+use tessia::domain::radicacion::{RadStatus, Step};
+
+fn line(invoice: &str, date: &str, ssc: &str, authorization: &str, total: &str) -> Line {
+    Line {
+        date: date.into(),
+        ssc: ssc.into(),
+        authorization: authorization.into(),
+        ..sample_line(invoice, 1, total)
+    }
+}
+
+fn filed(env: &Env, invoice: &str, at: &str, detail: &str) {
+    env.filing(invoice, Step::Crc, RadStatus::Confirmed, detail, at);
+}
+
+/// Two cargues; `FEV3` stopped at step 3, `FEV4` was never queued and `FEV5`
+/// is excluded although it has a confirmed filing row.
+fn radicadas_fixture(env: &Env) {
+    env.dataset("CargueA", 'a', |ds| {
+        ds.invoice(
+            InvoiceBuilder::new("FEV1")
+                .with_line(line("FEV1", "2026-09-03 11:28:31", "SSC1", "", "1.000,50"))
+                .with_line(line("FEV1", "", "", "AUT-9", "499,50")),
+        )
+        .invoice(InvoiceBuilder::new("FEV2").with_line(line(
+            "FEV2",
+            "2026-09-04",
+            "SSC2",
+            "AUT2",
+            "10",
+        )))
+        .invoice(InvoiceBuilder::new("FEV3").line("5"))
+        .invoice(InvoiceBuilder::new("FEV4").line("5"))
+        .excluded("FEV5", "MONTO_MAXIMO_SUPERADO")
+    });
+    env.dataset("CargueB", 'b', |ds| {
+        ds.invoice(InvoiceBuilder::new("FEV6").with_line(line("FEV6", "", "", "", "abc")))
+            .invoice(InvoiceBuilder::new("FEV10").line("7"))
+    });
+    filed(env, "FEV1", "2026-09-14 15:00:00+00", "Confirmado   paso 4");
+    filed(env, "FEV2", "2026-09-15 15:00:00+00", "");
+    filed(env, "FEV6", "2026-09-15 15:00:00+00", "=SUMA(1);2");
+    filed(env, "FEV10", "2026-09-10 15:00:00+00", "");
+    filed(env, "FEV5", "2026-09-16 15:00:00+00", "");
+    env.filing(
+        "FEV3",
+        Step::Rips,
+        RadStatus::Confirmed,
+        "",
+        "2026-09-16 15:00:00+00",
+    );
+    env.phase(
+        "FEV1",
+        Phase::Cuv,
+        Outcome::failed("CUV: intento 1\n  falló"),
+        7,
+    );
+    env.phase("FEV1", Phase::Rips, Outcome::done(), 8);
+}
+
+fn invoices(body: &Value) -> Vec<String> {
+    body["filas"]
+        .as_array()
+        .expect("filas")
+        .iter()
+        .map(|r| r["factura"].as_str().expect("factura").to_owned())
+        .collect()
+}
+
+#[test]
+fn the_radicadas_report_lists_only_fully_filed_prepared_invoices_with_their_summary() {
+    let env = env();
+    radicadas_fixture(&env);
+    let response = env.get("/api/reportes/radicadas", &[]);
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        response.header("content-type"),
+        Some("application/json; charset=utf-8")
+    );
+    let mut body = json(&response);
+    assert_eq!(body["generado_en"].as_str().map(str::len), Some(20));
+    body["generado_en"] = json!("GENERATED");
+    assert_eq!(
+        body,
+        json!({
+            "generado_en": "GENERATED",
+            "total": 4,
+            "truncado": false,
+            "filas": [
+                {"cargue": "CargueA", "cargue_nombre": "CargueA", "factura": "FEV2", "fecha_radicacion": "2026-09-15T15:00:00Z",
+                 "estado": "TERMINADO", "fecha_factura": "2026-09-04", "ssc": "SSC2", "autorizacion": "AUT2", "valor": "10", "observaciones": ""},
+                {"cargue": "CargueB", "cargue_nombre": "CargueB", "factura": "FEV6", "fecha_radicacion": "2026-09-15T15:00:00Z",
+                 "estado": "TERMINADO", "fecha_factura": "", "ssc": "", "autorizacion": "", "valor": "", "observaciones": "=SUMA(1);2"},
+                {"cargue": "CargueA", "cargue_nombre": "CargueA", "factura": "FEV1", "fecha_radicacion": "2026-09-14T15:00:00Z",
+                 "estado": "TERMINADO", "fecha_factura": "2026-09-03", "ssc": "SSC1", "autorizacion": "AUT-9", "valor": "1500",
+                 "observaciones": "CUV: intento 1 falló | Confirmado paso 4"},
+                {"cargue": "CargueB", "cargue_nombre": "CargueB", "factura": "FEV10", "fecha_radicacion": "2026-09-10T15:00:00Z",
+                 "estado": "TERMINADO", "fecha_factura": "2026-10-21", "ssc": "", "autorizacion": "", "valor": "7", "observaciones": ""},
+            ]
+        })
+    );
+    // Personal data of the lines never reaches the report.
+    assert!(!text(&response).contains("1000000001"));
+}
+
+#[test]
+fn the_radicadas_filters_narrow_by_cargue_day_and_invoice_text() {
+    let env = env();
+    radicadas_fixture(&env);
+    let list = |query: &[(&str, &str)]| invoices(&json(&env.get("/api/reportes/radicadas", query)));
+
+    assert_eq!(list(&[("cargue", "CargueA")]), ["FEV2", "FEV1"]);
+    assert_eq!(
+        list(&[("cargue", "CargueB"), ("cargue", "CargueB")]),
+        ["FEV6", "FEV10"]
+    );
+    assert_eq!(
+        list(&[("cargue", "CargueB"), ("cargue", "CargueA"), ("cargue", "")]),
+        ["FEV2", "FEV6", "FEV1", "FEV10"]
+    );
+    // `q` is a substring of the normalized invoice, in any case, ignoring hyphens.
+    assert_eq!(list(&[("q", "fev-1")]), ["FEV1", "FEV10"]);
+    assert_eq!(list(&[("q", " ev6 ")]), ["FEV6"]);
+    assert!(list(&[("q", "ZZZ")]).is_empty());
+
+    // Days compare the local day of the filing time, bounds included.
+    let local_day = |day: u32| {
+        Utc.with_ymd_and_hms(2026, 9, day, 15, 0, 0)
+            .unwrap()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    assert_eq!(
+        list(&[("desde", &local_day(14)), ("hasta", &local_day(14))]),
+        ["FEV1"]
+    );
+    assert_eq!(list(&[("desde", &local_day(15))]), ["FEV2", "FEV6"]);
+    assert_eq!(list(&[("hasta", &local_day(10))]), ["FEV10"]);
+    assert_eq!(
+        list(&[
+            ("desde", &local_day(11)),
+            ("hasta", &local_day(14)),
+            ("q", "fev")
+        ]),
+        ["FEV1"]
+    );
+}
+
+#[test]
+fn limite_truncates_the_preview_but_total_counts_every_match() {
+    let env = env();
+    radicadas_fixture(&env);
+    let body = json(&env.get("/api/reportes/radicadas", &[("limite", "3")]));
+    assert_eq!(body["total"], json!(4));
+    assert_eq!(body["truncado"], json!(true));
+    assert_eq!(invoices(&body), ["FEV2", "FEV6", "FEV1"]);
+    let exact = json(&env.get("/api/reportes/radicadas", &[("limite", "4")]));
+    assert_eq!(
+        (exact["total"].clone(), exact["truncado"].clone()),
+        (json!(4), json!(false))
+    );
+    // The CSV ignores the limit.
+    let csv = env.get(
+        "/api/reportes/radicadas",
+        &[("limite", "1"), ("formato", "csv")],
+    );
+    assert_eq!(
+        text(&csv).matches("\r\n").count(),
+        5,
+        "header plus every row"
+    );
+}
+
+#[test]
+fn an_empty_database_reports_nothing() {
+    let env = env();
+    let body = json(&env.get("/api/reportes/radicadas", &[]));
+    assert_eq!(
+        (
+            body["total"].clone(),
+            body["truncado"].clone(),
+            body["filas"].clone()
+        ),
+        (json!(0), json!(false), json!([]))
+    );
+}
+
+#[test]
+fn the_radicadas_query_is_validated_before_any_read() {
+    let env = env();
+    radicadas_fixture(&env);
+    let reject = |query: &[(&str, &str)], status: u16, message: &str| {
+        let response = env.get("/api/reportes/radicadas", query);
+        assert_eq!(
+            (response.status, error(&response)),
+            (status, message.to_owned()),
+            "{query:?}"
+        );
+    };
+    reject(&[("formato", "xml")], 400, "formato debe ser json o csv");
+    reject(&[("cargue", "a\\b")], 400, "cargue invalido \"a\\\\b\"");
+    reject(
+        &[("cargue", "Nope")],
+        404,
+        "dashboard: cargue not found: \"Nope\"",
+    );
+    reject(&[("desde", "2026-9-1")], 400, "desde debe ser YYYY-MM-DD");
+    reject(&[("hasta", "mañana")], 400, "hasta debe ser YYYY-MM-DD");
+    reject(
+        &[("desde", "2026-09-02"), ("hasta", "2026-09-01")],
+        400,
+        "hasta es anterior a desde",
+    );
+    reject(
+        &[("q", &"x".repeat(61))],
+        400,
+        "q no puede superar 60 caracteres",
+    );
+    reject(
+        &[("limite", "0")],
+        400,
+        "limite debe ser un entero positivo",
+    );
+    reject(
+        &[("limite", "tres")],
+        400,
+        "limite debe ser un entero positivo",
+    );
+}
+
+#[test]
+fn the_radicadas_csv_is_a_named_download_with_local_filing_times() {
+    let env = env();
+    radicadas_fixture(&env);
+    let today = Local::now().format("%Y%m%d").to_string();
+    let name = |query: &[(&str, &str)]| {
+        let mut all = query.to_vec();
+        all.push(("formato", "csv"));
+        let response = env.get("/api/reportes/radicadas", &all);
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.header("content-type"),
+            Some("text/csv; charset=utf-8")
+        );
+        response
+            .header("content-disposition")
+            .expect("content-disposition")
+            .to_owned()
+    };
+    assert_eq!(
+        name(&[]),
+        format!("attachment; filename=\"radicadas-todos-{today}.csv\"")
+    );
+    assert_eq!(
+        name(&[("cargue", "CargueA")]),
+        format!("attachment; filename=\"radicadas-CargueA-{today}.csv\"")
+    );
+    assert_eq!(
+        name(&[("cargue", "CargueA"), ("cargue", "CargueB")]),
+        format!("attachment; filename=\"radicadas-varios-{today}.csv\"")
+    );
+
+    let response = env.get(
+        "/api/reportes/radicadas",
+        &[("formato", "csv"), ("q", "fev6")],
+    );
+    let local = Utc
+        .with_ymd_and_hms(2026, 9, 15, 15, 0, 0)
+        .unwrap()
+        .with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    assert_eq!(
+        text(&response),
+        format!(
+            "\u{feff}Cargue;Nombre cargue;Factura;Fecha factura;Fecha radicacion;Estado;SSC;Autorizacion;Valor convenio;Observaciones\r\n\
+             CargueB;CargueB;FEV6;;{local};TERMINADO;;;;\"'=SUMA(1);2\"\r\n"
+        )
+    );
+}
+
+#[test]
+fn only_get_is_routed_for_the_radicadas_report() {
+    let env = env();
+    let response = env.post("/api/reportes/radicadas");
+    assert_eq!(response.status, 405);
+}

@@ -13,7 +13,7 @@ use super::chunks;
 use crate::db::{DbError, DbPool, DbResult};
 use crate::domain::normalize_invoice;
 use crate::domain::radicacion::{RadState, RadStatus, Step};
-pub use reports::{CargueRef, DatasetEntry, ReportStore};
+pub use reports::{CargueRef, DatasetEntry, FiledInvoice, LineFacts, PhaseNote, ReportStore};
 use schema::radicacion_estado as t;
 
 #[derive(Queryable, Selectable)]
