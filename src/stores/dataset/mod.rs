@@ -51,9 +51,11 @@
 //! # Ok(()) }
 //! ```
 
+pub mod dashboard;
 mod error;
 mod rows;
 mod schema;
+pub mod summary;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
@@ -79,6 +81,7 @@ use schema::{
     dataset_actual as act, dataset_factura as fac, dataset_linea as lin,
     dataset_preparacion as prep,
 };
+use summary::{InvoiceSummary, summarize};
 
 /// Rows per multi-row `INSERT` (well under Postgres' 65,535 bind limit).
 const INSERT_CHUNK: usize = 1000;
@@ -236,9 +239,11 @@ impl DatasetStore {
             )));
         }
         let mut audits = Vec::with_capacity(sorted.len());
+        let mut summaries = Vec::with_capacity(sorted.len());
         let mut lines: Vec<NewLinea> = Vec::new();
         for (invoice, _) in &sorted {
             audits.push(rows::encode_audit(invoice)?);
+            summaries.push(summarize(&invoice.lines));
             lines.extend(rows::line_rows(cargue, invoice)?);
         }
         self.in_tx("update dataset invoices", false, |conn| {
@@ -280,7 +285,7 @@ impl DatasetStore {
                 )
                 .execute(conn)?;
             }
-            for ((invoice, _), audit) in sorted.iter().zip(&audits) {
+            for (((invoice, _), audit), summary) in sorted.iter().zip(&audits).zip(&summaries) {
                 diesel::update(
                     fac::table.filter(
                         fac::cargue_seq
@@ -291,6 +296,11 @@ impl DatasetStore {
                 .set((
                     fac::id_mipres.eq(&invoice.id_mipres),
                     fac::conciliacion.eq(audit),
+                    fac::fecha_factura_txt.eq(&summary.date),
+                    fac::ssc.eq(&summary.ssc),
+                    fac::subplan.eq(&summary.subplan),
+                    fac::autorizacion.eq(&summary.authorization),
+                    fac::valor_convenio.eq(summary.agreement_value),
                     fac::version.eq(fac::version + 1),
                     fac::updated_at.eq(diesel::dsl::now),
                 ))
@@ -552,6 +562,7 @@ impl FacturaDraft {
             reason: self.reason.clone(),
             mipres: self.mipres.clone(),
             audit: self.audit.clone(),
+            summary: self.summary.clone(),
         }
         .into_row(cargue, orden, version)
     }
@@ -582,6 +593,7 @@ fn encode_dataset(ds: &Dataset) -> DatasetResult<(Vec<FacturaDraft>, Vec<NewLine
             reason: String::new(),
             mipres: inv.id_mipres.clone(),
             audit: rows::encode_audit(inv)?,
+            summary: summarize(&inv.lines),
         });
     }
     for e in &ds.excluded {
@@ -593,6 +605,7 @@ fn encode_dataset(ds: &Dataset) -> DatasetResult<(Vec<FacturaDraft>, Vec<NewLine
             reason: e.reason.clone(),
             mipres: String::new(),
             audit: None,
+            summary: InvoiceSummary::default(),
         });
     }
     for m in &ds.manual_review {
@@ -604,6 +617,7 @@ fn encode_dataset(ds: &Dataset) -> DatasetResult<(Vec<FacturaDraft>, Vec<NewLine
             reason: m.reason.clone(),
             mipres: String::new(),
             audit: None,
+            summary: InvoiceSummary::default(),
         });
     }
     Ok((drafts, lines))

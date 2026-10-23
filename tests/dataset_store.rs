@@ -806,3 +806,129 @@ fn the_context_exposes_the_store() {
         .unwrap();
     assert_eq!(ctx.dataset().invoice_names(again.seq).unwrap(), ["EVS1"]);
 }
+
+// ---- stored summary columns (dashboard read models) ------------------------
+
+#[derive(diesel::QueryableByName, Debug, PartialEq)]
+struct SummaryRow {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    factura: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    fecha_factura_txt: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    ssc: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    subplan: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    autorizacion: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    valor: Option<String>,
+}
+
+fn summary_rows(db: &TestDb, cargue: i64) -> Vec<SummaryRow> {
+    use diesel::RunQueryDsl;
+    diesel::sql_query(format!(
+        "SELECT factura, fecha_factura_txt, ssc, subplan, autorizacion, valor_convenio::text AS valor
+         FROM dataset_factura WHERE cargue_seq = {cargue} ORDER BY orden"
+    ))
+    .load(&mut db.conn())
+    .expect("summary rows")
+}
+
+fn dated_line(invoice: &str, date: &str, ssc: &str, auth: &str, total: &str) -> Line {
+    let mut l = sample_line(invoice, 1, total);
+    l.date = date.into();
+    l.ssc = ssc.into();
+    l.authorization = auth.into();
+    l
+}
+
+fn summary_dataset(cargue: i64) -> Dataset {
+    DatasetBuilder::new(cargue)
+        .load(LOAD)
+        .invoice(
+            InvoiceBuilder::new("EVS1")
+                .with_line(dated_line("EVS1", "  ", "", "", "100,50"))
+                .with_line(dated_line(
+                    "EVS1",
+                    "2026-09-03 11:28:31",
+                    "SSC1",
+                    "AUT1",
+                    "1.234,50",
+                ))
+                .with_line(dated_line("EVS1", "2026-09-09", "SSC2", "AUT2", "5")),
+        )
+        .invoice(InvoiceBuilder::new("EVS2").with_line(dated_line("EVS2", "", "", "", "abc")))
+        .invoice(InvoiceBuilder::new("EVS4"))
+        .excluded("EVS5", "VALOR_SUPERA_MONTO")
+        .build()
+}
+
+#[test]
+fn replace_stores_the_summary_columns_of_prepared_invoices_only() {
+    let f = fixture();
+    f.store.replace(&summary_dataset(f.cargue), false).unwrap();
+    let rows = summary_rows(&f.db, f.cargue);
+    let by = |name: &str| rows.iter().find(|r| r.factura == name).expect("row");
+    let one = by("EVS1");
+    assert_eq!(one.fecha_factura_txt, "2026-09-03");
+    assert_eq!(
+        (one.ssc.as_str(), one.autorizacion.as_str()),
+        ("SSC1", "AUT1")
+    );
+    assert_eq!(one.subplan, "EVENTO POS");
+    assert_eq!(one.valor.as_deref(), Some("1340.00"));
+    // One unreadable line total blanks the whole sum; no lines means no sum.
+    assert_eq!(by("EVS2").valor, None);
+    assert_eq!(by("EVS4").valor, None);
+    let excluded = by("EVS5");
+    assert_eq!(excluded.fecha_factura_txt, "");
+    assert_eq!(excluded.subplan, "");
+    assert_eq!(excluded.valor, None);
+}
+
+#[test]
+fn update_invoices_refreshes_the_summary_columns() {
+    let f = fixture();
+    f.store.replace(&summary_dataset(f.cargue), false).unwrap();
+    let mut read = f
+        .store
+        .read_invoices(f.cargue, Some(&names(&["EVS1"])))
+        .unwrap();
+    let mut inv = read.remove(0);
+    let expected = inv.version;
+    inv.lines = vec![dated_line("EVS1", "2026-10-01", "SSC9", "", "10")];
+    f.store
+        .update_invoices(f.cargue, &[(inv, expected)])
+        .unwrap();
+    let rows = summary_rows(&f.db, f.cargue);
+    let one = rows.iter().find(|r| r.factura == "EVS1").expect("row");
+    assert_eq!(one.fecha_factura_txt, "2026-10-01");
+    assert_eq!(one.ssc, "SSC9");
+    assert_eq!(one.autorizacion, "");
+    assert_eq!(one.valor.as_deref(), Some("10.00"));
+}
+
+#[test]
+fn the_backfill_migration_rebuilds_the_columns_from_the_stored_lines() {
+    use diesel::RunQueryDsl;
+    let f = fixture();
+    f.store.replace(&summary_dataset(f.cargue), false).unwrap();
+    let want = summary_rows(&f.db, f.cargue);
+    // Put the rows back in the state a pre-migration invoice has.
+    diesel::sql_query(
+        "UPDATE dataset_factura SET fecha_factura_txt = '', ssc = '', subplan = '',
+         autorizacion = '', valor_convenio = NULL",
+    )
+    .execute(&mut f.db.conn())
+    .unwrap();
+    assert!(
+        summary_rows(&f.db, f.cargue)
+            .iter()
+            .all(|r| r.fecha_factura_txt.is_empty() && r.valor.is_none())
+    );
+    let backfill =
+        include_str!("../migrations/2026-10-24-000200_dataset_factura_summary_backfill/up.sql");
+    diesel::connection::SimpleConnection::batch_execute(&mut f.db.conn(), backfill).unwrap();
+    assert_eq!(summary_rows(&f.db, f.cargue), want);
+}

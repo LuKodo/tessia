@@ -327,6 +327,20 @@ Stats (Go Stats)   InvoiceState::{Prepared "PREPARADA", Excluded "EXCLUIDA", Man
 * Storage: `dataset_linea.data` is the whole `Line` as JSONB (no 40-column table); `total_value` is copied
   out for the agreement total. `dataset_factura` keeps `estado`, `orden` (one sequence for the three states),
   `version`, `id_mipres`, `conciliacion` (JSONB).
+* **Summary columns** (dashboard read models, migrations `2026-10-24-000100_dataset_factura_summary` and
+  `..000200_..._backfill`): Go filters, sorts and aggregates the dashboard over stored columns of
+  `cargue_factura`, so `dataset_factura` carries the same five: `fecha_factura_txt` (first non-blank line
+  `date`, trimmed, 10 characters), `ssc`, `subplan`, `autorizacion` (first non-blank line value, trimmed) and
+  `valor_convenio NUMERIC(18,2) NULL` (sum of the line totals with the `parse_agreement_amount` rules; `NULL`
+  when there are no lines or one total is unreadable). Chosen over deriving them from `dataset_linea.data` at
+  read time because the JSON route reads every line of every invoice per poll and cannot parse `1.234,56` in
+  SQL. Trade-off: five more columns per invoice and a rule that must stay in one place:
+  `stores::dataset::summary::summarize` is the only Rust implementation, called by `replace` (every write
+  path of `replace`, `replace_touching` and merge) and `update_invoices` (lines change, so the columns are
+  rewritten with them); the backfill migration applies the same rules in SQL to the rows stored before, and
+  `tests/dataset_store.rs` proves both give the same columns. Excluded and manual-review invoices have no
+  lines, so their columns stay empty (as in Go). Nothing else writes them: code that changes lines must go
+  through those two methods.
 
 ### `DatasetStore` methods
 
@@ -372,6 +386,24 @@ Rules ported from Go:
   `Err(DatasetError::Invalid(..))` (radicacion maps it to `VALIDACION_VALOR_NO_DISPONIBLE`). Two decimals.
 * Snapshots: `read` runs in one read-only repeatable-read transaction, so a concurrent `replace` is seen
   whole or not at all.
+
+### Dashboard read queries (`stores::dataset::dashboard`)
+
+Read-only queries behind `GET /api/cargues`, `/api/resumen`, `/api/seguimiento/consulta` and
+`/api/facturas/{f}/seguimiento` (rules in `api::read::derive`, routes in `api::read::{cargues,resumen,consulta,tracking}`):
+`dashboard_loads(limit)` (current upload of every load; unprepared ones included), `dashboard_rows()` (every invoice
+of every current prepared cargue with its summary columns), `dashboard_prepared_names(seqs)`, `dashboard_native(scope)`
+(per invoice: filing row, the four artifact phase states, latest phase update; `last_detail` is only transferred
+when the rules can read it: status `BLOCKED` or the text holds `22`), `dashboard_extras(names)` (texts, `xml_valor`,
+`portal_cargue` of one page) and `dashboard_invoice(norm, load)`.
+
+Design choice and trade-off: Go classifies in SQL (derived tables over `cargue_factura`); Rust reads the narrow rows
+once and filters, sorts, pages (keyset cursor over (key, cargue, factura)), counts KPIs and facets in memory with the
+Go semantics, with one implementation of the estado/pipeline/alert rules (`derive`) for list rows, aggregates and
+the detail. Facets and totals need every row anyway, so SQL filtering would not avoid the scan. The cost is O(rows)
+per request (tens of thousands of narrow rows); the 2.5 s shared answer cache bounds it. The cache seam is
+`api::read::derive::cached`, to be pointed at `Cache::get_or_compute`. Known deviations: invoice names are stored
+normalized (Go kept `fvs-3`, which sorted after `FVS7`); `actualizado_en`/`modificado_en` are RFC 3339 UTC.
 
 ### How a phase reads and updates invoices
 

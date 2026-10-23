@@ -31,6 +31,11 @@ diesel::table! {
         conciliacion -> Nullable<Jsonb>,
         version -> Int8,
         updated_at -> Timestamptz,
+        fecha_factura_txt -> Text,
+        ssc -> Text,
+        subplan -> Text,
+        autorizacion -> Text,
+        valor_convenio -> Nullable<Numeric>,
     }
 }
 
