@@ -14,6 +14,11 @@ pub mod assets;
 pub mod downloads;
 pub mod protocol;
 
+#[cfg(feature = "desktop")]
+mod menu;
+#[cfg(feature = "desktop")]
+mod window;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -40,8 +45,8 @@ const CLOSE_WAIT: Duration = Duration::from_secs(3);
 #[cfg(feature = "desktop")]
 pub fn run(ctx: AppContext) -> Result<()> {
     assets::require_index(&assets::EmbeddedUi)?;
-    let _backend = Backend::open(ctx, Arc::new(assets::EmbeddedUi))?;
-    anyhow::bail!("the window is not implemented yet")
+    let backend = Backend::open(ctx, Arc::new(assets::EmbeddedUi))?;
+    window::run(backend)
 }
 
 /// A build without the window (`--no-default-features`).
