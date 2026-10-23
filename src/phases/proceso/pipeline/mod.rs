@@ -384,6 +384,7 @@ impl Run<'_> {
             self.inflight.done();
             return false;
         }
+        tracing::info!(invoice, phase = spec.name, "phase started");
         self.events.emit(
             Event::new("invoice_enter")
                 .invoice(invoice)
@@ -396,6 +397,7 @@ impl Run<'_> {
                 ..Verdict::new(Status::Failed, "")
             });
         let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        tracing::info!(invoice, phase = spec.name, ms, "phase finished");
         *lock(&self.state)
             .phase_ms
             .entry(spec.name.to_owned())
