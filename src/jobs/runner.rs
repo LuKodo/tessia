@@ -332,9 +332,13 @@ impl JobRunner {
             .name(id.to_owned())
             .spawn(move || {
                 let observed = job.clone();
-                let events = Events::new(Mode::Text, console(), false)
-                    .with_tap(move |event| lock(&observed.state).observe(event));
-                let outcome = catch_unwind(AssertUnwindSafe(|| work(&ctx, &events)));
+                // Building the events runs the console factory too: keep it inside the guard so a
+                // panic there still reaches `finish` instead of leaving the job running forever.
+                let outcome = catch_unwind(AssertUnwindSafe(|| {
+                    let events = Events::new(Mode::Text, console(), false)
+                        .with_tap(move |event| lock(&observed.state).observe(event));
+                    work(&ctx, &events)
+                }));
                 let error = match outcome {
                     Ok(Ok(())) => None,
                     Ok(Err(err)) => Some(format!("{err:#}")),

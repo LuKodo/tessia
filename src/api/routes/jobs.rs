@@ -313,9 +313,13 @@ fn non_empty(text: &str) -> Option<&str> {
     Some(text).filter(|t| !t.is_empty())
 }
 
-/// Go's `dashboard.ValidCargueID`.
+/// Go's `dashboard.ValidCargueID`, tightened: no `.` and no control characters either.
 fn valid_cargue_id(id: &str) -> bool {
-    !id.is_empty() && id != ".." && !id.contains(['/', '\\'])
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && !id.contains(['/', '\\'])
+        && !id.chars().any(char::is_control)
 }
 
 fn not_found_cargue(id: &str) -> ApiError {
@@ -391,4 +395,17 @@ fn type_error(name: &str, value: &Value, want: &str) -> ApiError {
         "cuerpo invalido: json: cannot unmarshal {} into Go struct field .{name} of type {want}",
         json_kind(value)
     ))
+}
+
+#[cfg(test)]
+mod cargue_id_tests {
+    use super::valid_cargue_id;
+
+    #[test]
+    fn rejects_dots_separators_and_control_characters() {
+        for bad in ["", ".", "..", "a/b", "a\\b", "a\0b", "a\nb"] {
+            assert!(!valid_cargue_id(bad), "{bad:?}");
+        }
+        assert!(valid_cargue_id("Convenio_01012026_02012026"));
+    }
 }

@@ -190,12 +190,24 @@ fn nota_tecnica_without_filas_metadata_and_without_an_upload_route() {
 }
 
 #[test]
-fn nota_tecnica_failure_is_a_generic_503() {
+fn nota_tecnica_failure_answers_200_with_nothing_published() {
     let h = Harness::with_context(|ctx| ctx.with_nt(Arc::new(BrokenNt)));
     let resp = h.get("/api/nota-tecnica");
-    assert_eq!(resp.status, 503);
-    assert_eq!(error_of(&resp), "no se pudo consultar la nota técnica");
+    assert_eq!(resp.status, 200);
+    assert_eq!(
+        json(&resp),
+        serde_json::json!({"exists": false, "file_name": "", "version": "", "filas": ""})
+    );
     assert!(!String::from_utf8_lossy(&resp.body).contains("secret"));
+}
+
+#[test]
+fn nota_tecnica_file_name_is_the_first_12_characters_of_the_version() {
+    let version = "0123456789abcdef0123456789abcdef";
+    let h = Harness::with_nt(MemoryNt::new().with_version(version, vec![]));
+    let body = json(&h.get("/api/nota-tecnica"));
+    assert_eq!(body["file_name"], "0123456789ab");
+    assert_eq!(body["version"], version);
 }
 
 // --- parameters -------------------------------------------------------------------

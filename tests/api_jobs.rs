@@ -907,6 +907,16 @@ fn reintentar_answers_404_for_an_unknown_or_invalid_cargue() {
         404,
         "dashboard: cargue not found: \"a%5Cb\"",
     );
+    assert_error(
+        &env.post("/api/cargues/./reintentar", body),
+        404,
+        "dashboard: cargue not found",
+    );
+    assert_error(
+        &env.post("/api/cargues/a%00b/reintentar", body),
+        404,
+        "dashboard: cargue not found: \"a%00b\"",
+    );
     assert_idle(&env);
 }
 

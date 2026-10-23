@@ -8,16 +8,13 @@
 
 use serde::Serialize;
 
-use crate::api::{ApiError, ApiResult, ApiState, request::Request, request::Response};
-
-/// Message of the 503 when Redis cannot be read (the driver error is not echoed).
-pub const NT_UNAVAILABLE: &str = "no se pudo consultar la nota técnica";
+use crate::api::{ApiResult, ApiState, request::Request, request::Response};
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct NotaTecnicaStatus {
     /// A current version exists.
     pub exists: bool,
-    /// The version, which names the loaded collection (empty when none).
+    /// First 12 characters of the version (empty when none).
     pub file_name: String,
     pub version: String,
     /// Row count from the version's `filas` metadata (empty when unknown).
@@ -26,22 +23,36 @@ pub struct NotaTecnicaStatus {
 
 pub fn get(state: &ApiState, _req: &Request) -> ApiResult {
     let nt = &state.ctx.nt;
+    // The card polls this every minute: an unreachable Redis is "nothing published", never an error.
+    let none = NotaTecnicaStatus {
+        exists: false,
+        file_name: String::new(),
+        version: String::new(),
+        filas: String::new(),
+    };
     let unavailable = |err: crate::nt::NtError| {
         tracing::warn!(error = %err, "nota tecnica: no se pudo leer Redis");
-        ApiError::unavailable(NT_UNAVAILABLE)
     };
-    let status = match nt.current_version().map_err(unavailable)? {
-        None => NotaTecnicaStatus {
-            exists: false,
-            file_name: String::new(),
-            version: String::new(),
-            filas: String::new(),
-        },
+    let version = match nt.current_version() {
+        Ok(version) => version,
+        Err(err) => {
+            unavailable(err);
+            return Ok(Response::json(&none));
+        }
+    };
+    let status = match version {
+        None => none,
         Some(version) => {
-            let meta = nt.meta(&version).map_err(unavailable)?;
+            let meta = match nt.meta(&version) {
+                Ok(meta) => meta,
+                Err(err) => {
+                    unavailable(err);
+                    return Ok(Response::json(&none));
+                }
+            };
             NotaTecnicaStatus {
                 exists: true,
-                file_name: version.clone(),
+                file_name: version.chars().take(12).collect(),
                 filas: meta.get("filas").cloned().unwrap_or_default(),
                 version,
             }

@@ -150,9 +150,10 @@ impl Bridge {
         }));
     }
 
-    /// Stops accepting API work, drops what is queued and waits up to `wait` for
-    /// requests already running (a request stuck on the network is left behind;
-    /// the process is about to exit).
+    /// Stops accepting API work and waits up to `wait` for requests already running
+    /// (a request stuck on the network is left behind; the process is about to exit).
+    /// Requests already queued still run, with their answers suppressed, so the caller
+    /// must close the job runner after this (it cancels and waits for any job they start).
     pub fn close(&self, wait: Duration) {
         self.closing.store(true, Ordering::SeqCst);
         self.pool.shutdown(wait);
