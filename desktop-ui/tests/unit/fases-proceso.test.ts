@@ -19,10 +19,11 @@ const phase = (over: Partial<JobPhaseProgress>): JobPhaseProgress => ({
   ...over,
 });
 
-async function mount(fases: JobPhaseProgress[] | undefined, radicadas?: number) {
+async function mount(fases: JobPhaseProgress[] | undefined, radicadas?: number, pasos?: JobPhaseProgress[]) {
   const el = document.createElement("tx-fases-proceso") as TxFasesProceso;
   el.fases = fases;
   el.radicadas = radicadas;
+  el.pasos = pasos;
   document.body.append(el);
   await el.updateComplete;
   const bars = [...el.shadowRoot!.querySelectorAll<TxProgress>("tx-progress")];
@@ -88,6 +89,18 @@ describe("<tx-fases-proceso>", () => {
     expect(rad).toContain("Radicación");
     expect(rad).toContain("3/4");
     expect(rad).toContain("3 radicadas");
+  });
+
+  it("replaces the radicación card with its four step cards, in place", async () => {
+    const pasos = [1, 2, 3, 4].map((n) =>
+      phase({ fase: `radicacion_${n}`, etiqueta: `Radicación · paso ${n}: X`, en_curso: n === 2 ? 3 : 0, terminadas: n === 1 ? 5 : 0 }),
+    );
+    const { cards } = await mount([phase({ fase: "derechos", terminadas: 2 }), phase({ fase: "radicacion", etiqueta: "radicacion", en_curso: 8 })], 5, pasos);
+    expect(cards.map((c) => c.dataset.fase)).toEqual(["derechos", "radicacion_1", "radicacion_2", "radicacion_3", "radicacion_4"]);
+    const first = cards[1]!.textContent!.replace(/\s+/g, " ");
+    expect(first).toContain("Radicación · paso 1: X");
+    expect(first).toContain("5 confirmadas");
+    expect(cards[2]!.textContent).toContain("3 en curso");
   });
 
   it("adds the radicación card from the confirmed counter alone", async () => {

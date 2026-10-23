@@ -250,6 +250,7 @@ struct Harness {
     cfg: Config,
     values: Option<Arc<Values>>,
     hook: Option<UploadedHook>,
+    progress: Option<super::progress::ProgressSink>,
     timings: Arc<Timings>,
 }
 
@@ -281,6 +282,7 @@ impl Harness {
             cfg: fast_config(),
             values: None,
             hook: None,
+            progress: None,
             timings: Arc::new(Timings::new()),
         }
     }
@@ -295,6 +297,7 @@ impl Harness {
             self.timings.clone(),
         );
         deps.on_uploaded = self.hook.clone();
+        deps.on_progress = self.progress.clone();
         Engine::new(self.cfg.clone(), deps)
             .run(CARGUE, &invoices)
             .expect("run")
@@ -360,6 +363,43 @@ fn defaults_follow_the_documented_numbers() {
         .batch_max,
         400
     );
+}
+
+#[test]
+fn the_progress_sink_sees_every_invoice_enter_and_finish_each_step() {
+    use super::progress::StepProgress;
+    let mut h = Harness::new(Portal::happy());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = seen.clone();
+    h.progress = Some(Arc::new(move |invoice, step, what| {
+        log.lock()
+            .expect("log")
+            .push((invoice.to_owned(), step, what));
+    }));
+    let report = h.run(&["FEV1", "FEV2"]);
+    assert_eq!(report.done, ["FEV1", "FEV2"]);
+    let seen = seen.lock().expect("log");
+    for invoice in ["FEV1", "FEV2"] {
+        let mine: Vec<_> = seen
+            .iter()
+            .filter(|(i, _, _)| i == invoice)
+            .map(|(_, step, what)| (step.as_i16(), *what))
+            .collect();
+        assert_eq!(
+            mine,
+            [
+                (1, StepProgress::Enter),
+                (1, StepProgress::Done),
+                (2, StepProgress::Enter),
+                (2, StepProgress::Done),
+                (3, StepProgress::Enter),
+                (3, StepProgress::Done),
+                (4, StepProgress::Enter),
+                (4, StepProgress::Done),
+            ],
+            "{invoice}"
+        );
+    }
 }
 
 #[test]

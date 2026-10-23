@@ -103,12 +103,18 @@ function card(f: JobPhaseProgress, doneLabel = "ok"): PhaseCard {
 }
 
 /**
- * One card per phase, in the order the job reports them. The done badge of the radicación phase
+ * One card per phase, in the order the job reports them (radicación as four step cards when `pasos` is given). The done badge of the radicación phase
  * reads "N radicadas". `radicadas` is the job's confirmed radicación total: if the job has it but no
  * radicación phase entry, a radicación card is added at the end.
  */
-export function phaseCards(fases: JobPhaseProgress[] | undefined, radicadas?: number): PhaseCard[] {
+export function phaseCards(fases: JobPhaseProgress[] | undefined, radicadas?: number, pasos?: JobPhaseProgress[]): PhaseCard[] {
   const phases = fases ?? [];
+  // Once radicación reports its four steps they replace its single card, in the same position.
+  if (pasos?.length) {
+    const steps = pasos.map((p) => card(p, "confirmadas"));
+    const cards = phases.flatMap((f) => (f.fase === "radicacion" ? steps : [card(f)]));
+    return phases.some((f) => f.fase === "radicacion") ? cards : [...cards, ...steps];
+  }
   const cards = phases.map((f) => card(f, f.fase === "radicacion" ? "radicadas" : "ok"));
   if (radicadas && radicadas > 0 && !phases.some((f) => f.fase === "radicacion")) {
     cards.push(card({ fase: "radicacion", etiqueta: "radicacion", en_curso: 0, terminadas: radicadas, revision_manual: 0, excluidas: 0, con_errores: 0 }, "radicadas"));

@@ -482,6 +482,8 @@ export interface JobSnapshot {
   estadisticas?: JobStats;
   fases?: JobPhaseProgress[];
   radicadas?: number;
+  /** Radicación split into its four steps; present once the first batch starts. */
+  radicacion_pasos?: JobPhaseProgress[];
   convenio?: JobConvenio;
   /** Identifies the `tessia serve` process: a change means the server restarted. */
   instancia_servidor?: string;

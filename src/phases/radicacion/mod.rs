@@ -24,6 +24,7 @@ pub mod engine;
 pub mod files;
 pub mod model;
 pub mod portal;
+pub mod progress;
 pub mod recheck;
 pub mod rules;
 pub mod timings;
@@ -367,6 +368,7 @@ pub fn run_cargue(
         ))
     });
     deps.on_uploaded = follower.clone().map(portal_hook);
+    deps.on_progress = progress::lookup(cargue_id);
     let cfg = Config {
         nit,
         ..opts.engine.clone()

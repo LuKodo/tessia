@@ -197,7 +197,7 @@ export class TxConsolaProceso extends LitElement {
         ${chips.length
           ? html`<div class="chips">${chips.map((c) => html`<tx-badge size="sm" variant="subtle" color=${c.color} title=${c.hint}>${c.label}: ${c.value}</tx-badge>`)}</div>`
           : nothing}
-        ${fases ? html`<tx-fases-proceso .fases=${fases} .radicadas=${job?.radicadas}></tx-fases-proceso>` : nothing}
+        ${fases ? html`<tx-fases-proceso .fases=${fases} .radicadas=${job?.radicadas} .pasos=${job?.radicacion_pasos}></tx-fases-proceso>` : nothing}
 
         <div id="console-body" ?hidden=${!this.open}>
           <pre data-testid="console-output">${job?.id ? job.salida : "sin actividad"}</pre>

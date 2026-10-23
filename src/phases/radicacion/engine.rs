@@ -33,6 +33,7 @@ use super::api::{ApiError, RadApi};
 use super::confirm::{Evidence, Outcome, Verdict, evaluate};
 use super::files::{Files, Found};
 use super::model::{Load, UploadFile};
+use super::progress::{ProgressSink, StepProgress};
 use super::rules::{
     check_value, requires_step1_reload, retryable_upload_message, still_processing, upload_lost,
 };
@@ -168,6 +169,8 @@ pub struct Deps {
     /// Told once per successful upload of a step of an invoice, after the
     /// progress was recorded. Must be cheap; a panic in it is contained.
     pub on_uploaded: Option<UploadedHook>,
+    /// Told about every step transition of every invoice (dashboard progress).
+    pub on_progress: Option<ProgressSink>,
 }
 
 impl Deps {
@@ -186,6 +189,7 @@ impl Deps {
             timings,
             now: Arc::new(Utc::now),
             on_uploaded: None,
+            on_progress: None,
         }
     }
 }
@@ -490,6 +494,7 @@ struct Shared {
     tm: Arc<Timings>,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
     hook: Option<UploadedHook>,
+    progress: Option<ProgressSink>,
     send_tx: Vec<Sender<Item>>,
     confirm_tx: Vec<Sender<Item>>,
     timer: Timer,
@@ -525,6 +530,7 @@ impl Shared {
             tm: deps.timings.clone(),
             now: deps.now.clone(),
             hook: deps.on_uploaded.clone(),
+            progress: deps.on_progress.clone(),
             send_tx,
             confirm_tx,
             timer: Timer::default(),
@@ -679,6 +685,7 @@ impl Shared {
     }
 
     fn dispatch(&self, item: Item) {
+        self.report(&item.st.invoice, item.st.step, StepProgress::Enter);
         match item.st.status {
             RadStatus::Sent => {
                 let step = item.st.step;
@@ -723,6 +730,9 @@ impl Shared {
     /// The item leaves the pipeline in category `cat`.
     fn finish(&self, mut item: Item, cat: Category) {
         self.save(&mut item);
+        if matches!(cat, Category::Rejected | Category::Blocked) {
+            self.report(&item.st.invoice, item.st.step, StepProgress::Failed);
+        }
         lock(&self.finals).insert(item.st.invoice.clone(), cat);
         tracing::info!(
             invoice = %item.st.invoice,
@@ -1069,6 +1079,15 @@ impl Shared {
         self.notify_uploaded(&invoice, step);
     }
 
+    /// Reports a step transition to the dashboard sink; it can never break the run.
+    fn report(&self, invoice: &str, step: Step, what: StepProgress) {
+        let Some(sink) = &self.progress else { return };
+        let call = std::panic::AssertUnwindSafe(|| sink(invoice, step, what));
+        if std::panic::catch_unwind(call).is_err() {
+            tracing::error!(invoice, step = step.as_i16(), "progress sink panicked");
+        }
+    }
+
     /// Calls the optional hook; it can never break the run.
     fn notify_uploaded(&self, invoice: &str, step: Step) {
         let Some(hook) = &self.hook else { return };
@@ -1216,6 +1235,8 @@ impl Shared {
             tracing::warn!(invoice = %invoice, detail = %verdict.message, "step 2 needs step 1 again");
             item.st.step1_reloaded = true;
             item.st.reload_for_step2 = true;
+            self.report(&invoice, step, StepProgress::Back);
+            self.report(&invoice, Step::InvoiceZip, StepProgress::Enter);
             item.st.step = Step::InvoiceZip;
             item.st.status = RadStatus::Pending;
             item.st.upload_id.clear();
@@ -1267,9 +1288,11 @@ impl Shared {
         item.st.last_detail = verdict.detail.clone();
         if step == Step::InvoiceZip && item.st.reload_for_step2 {
             item.st.reload_for_step2 = false;
+            self.report(&item.st.invoice, step, StepProgress::Back);
             self.advance(item, self.cfg.reload_delay());
             return;
         }
+        self.report(&item.st.invoice, step, StepProgress::Done);
         self.advance(item, Duration::ZERO);
     }
 
@@ -1311,6 +1334,7 @@ impl Shared {
             self.finish(item, Category::Advanced);
             return;
         }
+        self.report(&item.st.invoice, next, StepProgress::Enter);
         self.save(&mut item);
         self.push(Queue::Send(next), item, delay, sleep::RELOAD);
     }

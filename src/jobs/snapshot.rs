@@ -11,6 +11,7 @@ use chrono::{DateTime, Local, SecondsFormat};
 use serde::{Deserialize, Serialize};
 
 use super::synthetic_log::{self, JobError, SyntheticInput};
+use crate::domain::radicacion::Step;
 use crate::phases::proceso::Event;
 
 /// Go's zero `time.Time` as JSON.
@@ -105,6 +106,9 @@ pub struct JobSnapshot {
     pub fases: Vec<PhaseProgress>,
     #[serde(skip_serializing_if = "is_zero_usize")]
     pub radicadas: usize,
+    /// Radicación split into its four steps; empty until the first batch starts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub radicacion_pasos: Vec<PhaseProgress>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub convenio: Option<JobConvenio>,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -204,6 +208,8 @@ pub struct JobState {
     prep_manual: usize,
     convenio: Option<JobConvenio>,
     phases: Vec<Tally>,
+    /// The four radicación steps, created together by the first step event.
+    radicacion_steps: Vec<PhaseProgress>,
     radicacion_done: usize,
     cargue: String,
     plan: Vec<String>,
@@ -230,6 +236,7 @@ impl JobState {
             prep_manual: 0,
             convenio: None,
             phases: Vec::new(),
+            radicacion_steps: Vec::new(),
             radicacion_done: 0,
             cargue: String::new(),
             plan: Vec::new(),
@@ -383,6 +390,7 @@ impl JobState {
                 self.phase(RADICACION, &e.step).progress.en_curso += 1;
             }
             "radicacion" => self.observe_radicacion(e),
+            "radicacion_step" => self.observe_radicacion_step(e),
             "run_end" => self.observe_run_end(e),
             _ => {}
         }
@@ -404,6 +412,36 @@ impl JobState {
                 self.record_error(&e.invoice, &e.step, error_detail(e));
             }
             _ => {} // SKIPPED: another machine owns the invoice, nothing to count
+        }
+    }
+
+    /// One invoice moving through a radicación step (`e.phase` = `radicacion_N`).
+    fn observe_radicacion_step(&mut self, e: &Event) {
+        if self.radicacion_steps.is_empty() {
+            self.radicacion_steps = Step::ALL
+                .iter()
+                .map(|step| PhaseProgress {
+                    fase: format!("radicacion_{}", step.as_i16()),
+                    etiqueta: format!("Radicación · paso {}: {}", step.as_i16(), step.label()),
+                    ..PhaseProgress::default()
+                })
+                .collect();
+        }
+        let Some(progress) = self.radicacion_steps.iter_mut().find(|p| p.fase == e.phase) else {
+            return;
+        };
+        match e.status.as_str() {
+            "ENTER" => progress.en_curso += 1,
+            "DONE" => {
+                progress.en_curso = progress.en_curso.saturating_sub(1);
+                progress.terminadas += 1;
+            }
+            "BACK" => progress.en_curso = progress.en_curso.saturating_sub(1),
+            "FAILED" => {
+                progress.en_curso = progress.en_curso.saturating_sub(1);
+                progress.con_errores += 1;
+            }
+            _ => {}
         }
     }
 
@@ -503,6 +541,7 @@ impl JobState {
             salida: self.synthetic_output(&phases),
             estadisticas: self.stats.clone(),
             radicadas: self.radicacion_done,
+            radicacion_pasos: self.radicacion_steps.clone(),
             convenio: self.convenio.clone(),
             instancia_servidor: self.instance.clone(),
             fases: phases,
@@ -816,6 +855,43 @@ mod tests {
             out.contains("Error · lote de 3 facturas · radicacion run · boom"),
             "{out}"
         );
+    }
+
+    #[test]
+    fn radicacion_steps_count_each_invoice_where_it_is() {
+        let (mut job, _) = state();
+        let at = |step: i16, status: &str| Event {
+            invoice: "F1".into(),
+            phase: format!("radicacion_{step}"),
+            status: status.into(),
+            ..ev("radicacion_step")
+        };
+        assert!(job.snapshot().radicacion_pasos.is_empty());
+        job.observe(&at(1, "ENTER"));
+        job.observe(&at(1, "DONE"));
+        job.observe(&at(2, "ENTER"));
+        job.observe(&at(2, "BACK"));
+        job.observe(&at(1, "ENTER"));
+        job.observe(&at(1, "DONE"));
+        job.observe(&at(2, "ENTER"));
+        job.observe(&at(2, "DONE"));
+        job.observe(&at(3, "ENTER"));
+        job.observe(&at(3, "FAILED"));
+        let pasos = job.snapshot().radicacion_pasos;
+        let counts: Vec<_> = pasos
+            .iter()
+            .map(|p| (p.fase.as_str(), p.en_curso, p.terminadas, p.con_errores))
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("radicacion_1", 0, 2, 0),
+                ("radicacion_2", 0, 1, 0),
+                ("radicacion_3", 0, 0, 1),
+                ("radicacion_4", 0, 0, 0)
+            ]
+        );
+        assert_eq!(pasos[0].etiqueta, "Radicación · paso 1: ZIP XML/PDF");
     }
 
     #[test]

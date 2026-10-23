@@ -15,6 +15,7 @@ export class TxFasesProceso extends LitElement {
   static properties = {
     fases: { attribute: false },
     radicadas: { type: Number },
+    pasos: { attribute: false },
   };
 
   static styles = css`
@@ -68,9 +69,10 @@ export class TxFasesProceso extends LitElement {
 
   fases?: JobPhaseProgress[];
   radicadas?: number;
+  pasos?: JobPhaseProgress[];
 
   render() {
-    const cards = phaseCards(this.fases, this.radicadas);
+    const cards = phaseCards(this.fases, this.radicadas, this.pasos);
     if (!cards.length) return nothing;
     return html`
       <div class="grid">

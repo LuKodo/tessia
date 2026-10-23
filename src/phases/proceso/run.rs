@@ -1,11 +1,14 @@
 //! `proceso run`: seed, stream, alerts (Go `runProcesoRun` + `buildPipeline`).
 
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 
 use super::classify::{Verdict, classify};
 use super::config::RunConfig;
+use super::events::Event;
 use super::events::Events;
 use super::pipeline::{
     Finished, Fired, GateConfig, Hooks, PhaseSpec, PipelineConfig, run_pipeline,
@@ -16,6 +19,7 @@ use super::steps::label;
 use crate::context::AppContext;
 use crate::domain::{Phase, PhaseState};
 use crate::phases::common::{PhaseReport, PhaseRequest};
+use crate::phases::radicacion::progress::{self, StepProgress};
 
 /// What a run did.
 #[derive(Debug, Clone)]
@@ -71,7 +75,7 @@ fn stream(
 ) -> Finished {
     let pipeline = pipeline_config(cfg, seeded);
     let run = |phase: &str, invoice: &str| run_one(ctx, runner, &seeded.cargue_id, phase, invoice);
-    let fire = |batch: &[String]| fire_batch(ctx, cfg, runner, &seeded.cargue_id, batch);
+    let fire = |batch: &[String]| fire_batch(ctx, cfg, runner, events, &seeded.cargue_id, batch);
     let supply = |n: usize| match &seeded.supplier {
         Some(supplier) => supplier.supply(ctx, events, n),
         None => Ok(Vec::new()),
@@ -167,6 +171,54 @@ fn run_one(
 /// Files one batch through `radicacion`. While another machine files the same
 /// cargue the batch waits (its lease serializes uploads) instead of failing.
 fn fire_batch(
+    ctx: &AppContext,
+    cfg: &RunConfig,
+    runner: &PhaseRunner,
+    events: &Events,
+    cargue_id: &str,
+    batch: &[String],
+) -> Fired {
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let registration = progress::register(
+        cargue_id,
+        Arc::new(move |invoice, step, what| {
+            let _ = tx.send((invoice.to_owned(), step, what));
+        }),
+    );
+    let finished = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        // Turns the engine's step transitions into dashboard events.
+        scope.spawn(|| {
+            let emit =
+                |(invoice, step, what): (String, crate::domain::radicacion::Step, StepProgress)| {
+                    events.emit(
+                        Event::new("radicacion_step")
+                            .invoice(&invoice)
+                            .phase(&format!("radicacion_{}", step.as_i16()), step.label())
+                            .status(what.as_str()),
+                    );
+                };
+            loop {
+                match rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(message) => emit(message),
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                        if finished.load(Ordering::SeqCst) {
+                            rx.try_iter().for_each(emit);
+                            return;
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+                }
+            }
+        });
+        let fired = file_batch(ctx, cfg, runner, cargue_id, batch);
+        drop(registration);
+        finished.store(true, Ordering::SeqCst);
+        fired
+    })
+}
+
+fn file_batch(
     ctx: &AppContext,
     cfg: &RunConfig,
     runner: &PhaseRunner,
