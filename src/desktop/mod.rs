@@ -11,6 +11,7 @@
 //! (a server running the daily cron) needs no GTK/WebKit libraries.
 
 pub mod assets;
+pub mod downloads;
 pub mod protocol;
 
 use std::sync::Arc;
