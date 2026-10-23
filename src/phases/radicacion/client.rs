@@ -137,10 +137,13 @@ impl MutualSerClient {
             anyhow::bail!("mutualser: falta la URL base o el NIT");
         }
         let api_options = crate::http::ClientOptions::default()
+            .with_user_agent(USER_AGENT)
             .with_timeout(cfg.api_timeout)
             .with_ca_file(cfg.ca_file.as_deref());
         let http = crate::http::build_client(&api_options)?;
-        let upload_options = crate::http::ClientOptions::default().with_timeout(cfg.upload_timeout);
+        let upload_options = crate::http::ClientOptions::default()
+            .with_user_agent(USER_AGENT)
+            .with_timeout(cfg.upload_timeout);
         let upload_http = crate::http::build_client(&upload_options)?;
         let login = LoginConfig::from(&cfg);
         let login_http = login_client(&cfg)?;
@@ -913,10 +916,15 @@ impl From<&ClientConfig> for LoginConfig {
     }
 }
 
+/// ZonaSer answers HTTP 500 to requests without a `User-Agent` (reqwest sends
+/// none by default), so every client of this module sets one.
+const USER_AGENT: &str = concat!("Tessia/", env!("CARGO_PKG_VERSION"));
+
 /// A client that never follows redirects, with the ZonaSer CA pin.
 fn login_client(cfg: &ClientConfig) -> anyhow::Result<Client> {
     use anyhow::Context;
     let mut builder = Client::builder()
+        .user_agent(USER_AGENT)
         .timeout(cfg.api_timeout)
         .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none());
@@ -955,7 +963,13 @@ impl LoginConfig {
             ));
         }
         if status.as_u16() != 200 {
-            return Err(format!("tocumen: login failed (HTTP {})", status.as_u16()));
+            let mut raw = Vec::new();
+            let _ = response.take(2048).read_to_end(&mut raw);
+            return Err(format!(
+                "tocumen: login failed (HTTP {}){}",
+                status.as_u16(),
+                self.body_hint(&raw)
+            ));
         }
         let mut raw = Vec::new();
         let _ = response.take(1 << 20).read_to_end(&mut raw);
@@ -973,6 +987,28 @@ impl LoginConfig {
             expires_at: Some(token_expiry(&token, expires_in)),
             token,
         })
+    }
+}
+
+impl LoginConfig {
+    /// A short single-line excerpt of an error body (` - cuerpo: ...`), with
+    /// the configured password masked in case the server echoes it.
+    fn body_hint(&self, raw: &[u8]) -> String {
+        let mut text = String::from_utf8_lossy(raw).into_owned();
+        if self.password.len() >= 4 {
+            text = text.replace(self.password.as_str(), "[redacted]");
+        }
+        let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if one_line.is_empty() {
+            return String::new();
+        }
+        let shown: String = one_line.chars().take(300).collect();
+        let more = if one_line.chars().count() > 300 {
+            "..."
+        } else {
+            ""
+        };
+        format!(" - cuerpo: {shown}{more}")
     }
 }
 

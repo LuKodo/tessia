@@ -345,7 +345,7 @@ fn defaults_follow_the_documented_numbers() {
     assert_eq!(cfg.poll_max_interval, Duration::from_secs(120));
     assert_eq!(
         (cfg.quick_retries, cfg.quick_retry_delay),
-        (3, Duration::from_secs(3))
+        (3, Duration::from_secs(30))
     );
     assert_eq!(cfg.retry_interval, Duration::from_secs(600));
     assert_eq!(cfg.step2_xml_polls, 5);

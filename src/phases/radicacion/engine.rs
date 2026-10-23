@@ -121,7 +121,7 @@ impl Config {
         if self.quick_retries <= 0 {
             self.quick_retries = 3;
         }
-        or(&mut self.quick_retry_delay, Duration::from_secs(3));
+        or(&mut self.quick_retry_delay, Duration::from_secs(30));
         or(&mut self.retry_interval, Duration::from_secs(600));
         if self.step2_xml_polls <= 0 {
             self.step2_xml_polls = 5;
