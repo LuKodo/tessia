@@ -516,6 +516,8 @@ export interface RunRequest {
   From: string;
   To: string;
   Limit: number;
+  /** Prepare the convenio again (current cap) even when the cargue is already prepared. Sent only when true. */
+  Reprepare?: boolean;
 }
 
 /** POST /api/download body. Quirk: capitalized keys, dates as YYYY-MM-DD. 409 when the folder exists. */

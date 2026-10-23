@@ -10,6 +10,7 @@ import { statusColor } from "../utils/status-color";
 import "./tx-badge";
 import "./tx-button";
 import "./tx-card";
+import "./tx-checkbox";
 import "./tx-form-field";
 import "./tx-input";
 import "./tx-select";
@@ -31,6 +32,7 @@ export class TxProcesoPanel extends LitElement {
     from: { state: true },
     to: { state: true },
     limit: { state: true },
+    reprepare: { state: true },
     status: { state: true },
   };
 
@@ -55,6 +57,10 @@ export class TxProcesoPanel extends LitElement {
       min-width: 140px;
     }
     .row > .cargue {
+      flex-basis: 260px;
+      min-width: 220px;
+    }
+    .row > .reprepare {
       flex-basis: 260px;
       min-width: 220px;
     }
@@ -99,6 +105,7 @@ export class TxProcesoPanel extends LitElement {
   to = "";
   // Raw text of the limit input; `Number(text) || 0` is what the API receives.
   limit = "0";
+  reprepare = false;
   status: UiMessage = { text: "", kind: "" };
 
   // Keep the selection valid: default to the first cargue, and fall back to it if the selected
@@ -131,7 +138,7 @@ export class TxProcesoPanel extends LitElement {
     this.status = { text: "iniciando…", kind: "" };
     try {
       // Capitalized keys: the Go request struct has no json tags.
-      await api.runJob({ Cargue: cargue, From: fromPhase, To: toPhase, Limit: limit });
+      await api.runJob({ Cargue: cargue, From: fromPhase, To: toPhase, Limit: limit, ...(this.reprepare ? { Reprepare: true } : {}) });
       this.status = { text: "en curso — sigue el progreso justo abajo", kind: "ok" };
     } catch (e) {
       this.status = { text: errorMessage(e), kind: "error" };
@@ -211,6 +218,14 @@ export class TxProcesoPanel extends LitElement {
               .value=${this.limit}
               @tx-input=${(e: CustomEvent<{ value: string }>) => (this.limit = e.detail.value)}
             ></tx-input>
+          </tx-form-field>
+          <tx-form-field class="reprepare" label="Convenio" help="Recalcula con los parámetros actuales (p. ej. el monto máximo) aunque el cargue ya esté preparado.">
+            <tx-checkbox
+              data-testid="reprepare"
+              label="Volver a preparar"
+              .checked=${this.reprepare}
+              @tx-change=${(e: CustomEvent<{ checked: boolean }>) => (this.reprepare = e.detail.checked)}
+            ></tx-checkbox>
           </tx-form-field>
           <tx-button data-testid="run-full" @click=${() => void this.runPipeline("", "")}>Proceso completo</tx-button>
           <tx-button variant="outline" data-testid="run-section" @click=${() => void this.runPipeline(this.from, this.to)}>Ejecutar sección</tx-button>

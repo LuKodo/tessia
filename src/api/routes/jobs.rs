@@ -61,6 +61,7 @@ pub fn run(state: &ApiState, req: &Request) -> ApiResult {
     let from = string_field(&body, "From")?;
     let to = string_field(&body, "To")?;
     let limit = int_field(&body, "Limit")?;
+    let reprepare = bool_field(&body, "Reprepare")?;
 
     if !valid_cargue_id(&cargue) {
         return Err(ApiError::bad_request(format!("cargue invalido {cargue:?}")));
@@ -81,6 +82,7 @@ pub fn run(state: &ApiState, req: &Request) -> ApiResult {
     cfg.limit =
         usize::try_from(limit).map_err(|_| ApiError::bad_request("--limit is too large"))?;
     cfg.mode = Mode::Text;
+    cfg.reprepare = reprepare;
     cfg.active = active.clone();
     let options = StartOptions {
         cargue: Some(cargue),
@@ -387,6 +389,15 @@ fn int_field(body: &Map<String, Value>, name: &str) -> Result<i64, ApiError> {
             .as_i64()
             .ok_or_else(|| type_error(name, &Value::Number(number.clone()), "int")),
         Some(other) => Err(type_error(name, other, "int")),
+    }
+}
+
+/// A boolean field (absent or null is false).
+fn bool_field(body: &Map<String, Value>, name: &str) -> Result<bool, ApiError> {
+    match body.get(&name.to_lowercase()) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(flag)) => Ok(*flag),
+        Some(other) => Err(type_error(name, other, "bool")),
     }
 }
 

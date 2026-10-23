@@ -203,6 +203,18 @@ describe("<tx-proceso-panel>", () => {
     expect(callsTo("POST", "/api/run")[0]?.body).toEqual({ Cargue: "A", From: "derechos", To: "cuv", Limit: 5 });
   });
 
+  it("sends Reprepare only when the checkbox is ticked", async () => {
+    const { el, callsTo } = await mountPanel([cargue({})]);
+    const box = q<HTMLElement & { checked: boolean }>(el, "[data-testid=reprepare]");
+    box.checked = true;
+    box.dispatchEvent(new CustomEvent("tx-change", { detail: { value: "", checked: true }, bubbles: true, composed: true }));
+    await el.updateComplete;
+    click(q(el, "[data-testid=run-full]"));
+    dialogs.answerConfirm(true);
+    await flush(el);
+    expect(callsTo("POST", "/api/run")[0]?.body).toEqual({ Cargue: "A", From: "", To: "", Limit: 0, Reprepare: true });
+  });
+
   it("does not run when the operator declines", async () => {
     const { el, callsTo } = await mountPanel([cargue({})]);
     click(q(el, "[data-testid=run-full]"));
