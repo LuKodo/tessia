@@ -40,11 +40,13 @@ md-5 = "0.10"
 mime_guess = "2"
 percent-encoding = "2"
 # Statically builds libpq so the binary does not need a system libpq.
-pq-sys = { version = "0.7", features = ["bundled"] }
+# No OpenSSL: the app's Postgres is local/plain-TCP, so libpq is built
+# without TLS and the Windows build needs no OpenSSL installation.
+pq-sys = { version = "0.7", features = ["bundled_without_openssl"] }
 quick-xml = "0.38"
 r2d2 = "0.8"
 rand = "0.9"
-redis = { version = "1", features = ["tls-native-tls"] }
+redis = { version = "1", features = ["tls-rustls-webpki-roots"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "cookies", "gzip", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
