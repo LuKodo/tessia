@@ -162,6 +162,7 @@ mod tests {
     fn input() -> RipsInput {
         RipsInput {
             invoice: "FVS1".into(),
+            id_mipres: Vec::new(),
             lines: vec![RipsLine {
                 source_line: 1,
                 doc_type: "CC".into(),

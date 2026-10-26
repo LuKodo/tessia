@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! GET {base}/api/GenerarToken/{nit}/{tokenPPAL}                    -> "secondary token"
-//! GET {base}/api/EntregaXPrescripcion/{nit}/{token}/{prescription} -> [ {ID, EstEntrega, ...} ]
+//! GET {base}/api/EntregaXPrescripcion/{nit}/{token}/{prescription} -> [ {ID, IDEntrega, EstEntrega, ...} ]
 //! ```
 //!
 //! The primary token (`mipres.token_ppal`) is traded for a secondary token
@@ -407,9 +407,9 @@ pub fn path_escape(text: &str) -> String {
     out
 }
 
-/// Tolerant decoding of the delivery list: `ID` and `EstEntrega` arrive as
-/// numbers or strings, keys match case-insensitively, unknown fields are
-/// ignored; a blank or `null` answer is an empty list.
+/// Tolerant decoding of the delivery list: `ID`, `IDEntrega` and `EstEntrega`
+/// arrive as numbers or strings, keys match case-insensitively, unknown fields
+/// are ignored; a blank or `null` answer is an empty list.
 fn decode(raw: &[u8]) -> Result<Vec<Delivery>, MipresError> {
     let not_a_list =
         || MipresError::Other("mipres: response is not a JSON array of deliveries".into());
@@ -433,6 +433,7 @@ fn decode(raw: &[u8]) -> Result<Vec<Delivery>, MipresError> {
             };
             Ok(Delivery {
                 id: field("ID"),
+                delivery_id: field("IDEntrega"),
                 state: parse_state(&field("EstEntrega")),
             })
         })
@@ -513,9 +514,17 @@ mod tests {
         ]"#,
         ));
         let got = client(&server).entregas("20240101").expect("deliveries");
-        let expected: Vec<(&str, i32)> =
-            vec![("123", 2), ("456", 0), ("789", -1), ("790", -1), ("5", 1)];
-        let got: Vec<(&str, i32)> = got.iter().map(|d| (d.id.as_str(), d.state)).collect();
+        let expected: Vec<(&str, &str, i32)> = vec![
+            ("123", "9", 2),
+            ("456", "", 0),
+            ("789", "", -1),
+            ("790", "", -1),
+            ("5", "", 1),
+        ];
+        let got: Vec<(&str, &str, i32)> = got
+            .iter()
+            .map(|d| (d.id.as_str(), d.delivery_id.as_str(), d.state))
+            .collect();
         assert_eq!(got, expected);
         let requests = server.requests();
         assert_eq!(requests.len(), 2, "token + one delivery request");
@@ -693,7 +702,7 @@ mod tests {
             if request.path.contains("/tok-1/") {
                 MockResponse::json(401, "{}")
             } else {
-                MockResponse::json(200, r#"[{"ID":"7","EstEntrega":2}]"#)
+                MockResponse::json(200, r#"[{"ID":"7","IDEntrega":"77","EstEntrega":2}]"#)
             }
         });
         let got = client(&server).entregas("1").expect("retried");
@@ -701,6 +710,7 @@ mod tests {
             got,
             vec![Delivery {
                 id: "7".into(),
+                delivery_id: "77".into(),
                 state: 2
             }]
         );

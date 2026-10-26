@@ -6,7 +6,8 @@
 //! deliveries of the prescription are asked once per run (failures are cached
 //! too). Outcomes:
 //!
-//! * any matching delivery in state 2 passes the line (its id is stored);
+//! * any matching delivery in state 2 passes the line (its `IDEntrega` is
+//!   stored as the invoice's MIPRES id);
 //! * otherwise annulled (0) excludes with `MIPRES ANULADO`, then not
 //!   delivered (1) with `MIPRES NO ENTREGADO`;
 //! * no delivery with that id excludes with `MIPRES SIN ENTREGA: ...`;
@@ -42,10 +43,13 @@ pub fn is_evento_no_pbs(subplan: &str) -> bool {
     normalize_key(subplan) == EVENTO_NO_PBS
 }
 
-/// One delivery of a prescription; `id` is our No. Formula.
+/// One delivery of a prescription; `id` is our No. Formula (matched against
+/// the line's `numero_formula`), `delivery_id` is the service's `IDEntrega`
+/// (the id Mutual demands at billing and the one that is stored).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Delivery {
     pub id: String,
+    pub delivery_id: String,
     pub state: i32,
 }
 
@@ -211,7 +215,7 @@ impl<'a> MipresRun<'a> {
             ));
         };
         if let Some(delivered) = matched.iter().find(|d| d.state == STATE_ENTREGADO) {
-            return LineVerdict::Delivered(delivered.id.trim().to_owned());
+            return LineVerdict::Delivered(delivered.delivery_id.trim().to_owned());
         }
         if matched.iter().any(|d| d.state == STATE_ANULADO) {
             return LineVerdict::Exclude(REASON_MIPRES_ANULADO.to_owned());

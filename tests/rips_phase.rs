@@ -51,6 +51,7 @@ fn input(invoice: &str, lines: Vec<RipsLine>) -> RipsInput {
     RipsInput {
         invoice: invoice.into(),
         lines,
+        id_mipres: Vec::new(),
     }
 }
 

@@ -5,7 +5,6 @@
 use anyhow::{Result, bail};
 
 use super::derechos::AffiliateRights;
-use super::encode::normalize_id_mipres;
 use super::input::{RipsInput, RipsLine};
 use super::java::{
     birth_date_iso, extract_hour_minute, go_quote, go_upper, java_double_to_int, java_money,
@@ -103,6 +102,19 @@ pub fn build(input: &RipsInput, aff: &AffiliateRights, opts: &RipsOptions) -> Bu
     if opts.nit.is_empty() || opts.cod_prestador.is_empty() {
         bail!("rips: NIT and CodPrestador are required");
     }
+    let no_pbs_lines = input
+        .lines
+        .iter()
+        .filter(|l| !java_trim(&l.mipres).is_empty())
+        .count();
+    if no_pbs_lines != input.id_mipres.len() {
+        bail!(
+            "rips: factura {}: datos inconsistentes: {} ids de entrega MIPRES guardados para {} lineas NO PBS",
+            input.invoice,
+            input.id_mipres.len(),
+            no_pbs_lines
+        );
+    }
     Ok(build_document(input, aff, opts))
 }
 
@@ -173,7 +185,14 @@ fn build_services(
 ) -> Result<Services, SkipError> {
     let mut meds = Vec::new();
     let mut oss = Vec::new();
+    let mut delivery_ids = input.id_mipres.iter();
     for line in &input.lines {
+        let mipres_id: Option<&str> = if java_trim(&line.mipres).is_empty() {
+            None
+        } else {
+            // Count validated in build_document; ids follow the NO PBS line order.
+            Some(delivery_ids.next().expect("one id per NO PBS line"))
+        };
         let invalid = |detail: String| {
             SkipError::new(
                 CODE_INVALID_DATA,
@@ -184,7 +203,8 @@ fn build_services(
             PRODUCT_MEDICINE => {
                 let seq = meds.len() + 1;
                 if let Some(m) =
-                    medicamento(&input.invoice, line, tipo_usuario, seq, opts).map_err(invalid)?
+                    medicamento(&input.invoice, line, mipres_id, tipo_usuario, seq, opts)
+                        .map_err(invalid)?
                 {
                     meds.push(m);
                 }
@@ -192,7 +212,7 @@ fn build_services(
             PRODUCT_OTHER => {
                 let seq = oss.len() + 1;
                 oss.push(
-                    otro_servicio(&input.invoice, line, tipo_usuario, seq, opts)
+                    otro_servicio(&input.invoice, line, mipres_id, tipo_usuario, seq, opts)
                         .map_err(invalid)?,
                 );
             }
@@ -214,6 +234,7 @@ type FieldResult<T> = std::result::Result<T, String>;
 fn medicamento(
     invoice: &str,
     l: &RipsLine,
+    mipres_id: Option<&str>,
     tipo_usuario: &str,
     seq: usize,
     opts: &RipsOptions,
@@ -226,7 +247,7 @@ fn medicamento(
     let diag = go_upper(&l.diagnosis_code);
     let mut m = Medicamento {
         cod_prestador: opts.cod_prestador.clone(),
-        id_mipres: id_mipres(l),
+        id_mipres: mipres_id.map(str::to_owned),
         fecha_dispens_admon: fecha,
         cod_diagnostico_relacionado: related_diagnosis(&diag),
         cod_diagnostico_principal: diag,
@@ -279,6 +300,7 @@ fn medicamento(
 fn otro_servicio(
     invoice: &str,
     l: &RipsLine,
+    mipres_id: Option<&str>,
     tipo_usuario: &str,
     seq: usize,
     opts: &RipsOptions,
@@ -287,7 +309,7 @@ fn otro_servicio(
     let mut o = OtroServicio {
         cod_prestador: opts.cod_prestador.clone(),
         num_autorizacion: Some(java_trim(&l.authorization).to_owned()),
-        id_mipres: id_mipres(l),
+        id_mipres: mipres_id.map(str::to_owned),
         fecha_suministro_tecnologia: fecha,
         tipo_os: TIPO_OS.to_owned(),
         cod_tecnologia_salud: l.cum.clone(),
@@ -340,15 +362,10 @@ fn related_diagnosis(principal: &str) -> String {
     }
 }
 
-/// Only when the `mipres` column has a value, and then (as in Java) the value
-/// sent is the `no. formula` column.
-fn id_mipres(l: &RipsLine) -> Option<String> {
-    if java_trim(&l.mipres).is_empty() {
-        return None;
-    }
-    normalize_id_mipres(&l.formula_number)
-}
-
+/// `idMIPRES` is sent only when the `mipres` column has a value; the id is
+/// then the delivery id (`IDEntrega`) the convenio phase stored for that NO
+/// PBS line, exactly as the service returned it (see `build_services`).
+///
 /// `obtenerFechaDispensacionDtm` + `normalizarFechaHoraDispensacion`:
 /// `"yyyy-MM-dd HH:mm"`, with `hour()` when the value carries no time (always,
 /// once the date is normalized).
@@ -466,6 +483,7 @@ mod tests {
         RipsInput {
             invoice: "FVS1".into(),
             lines,
+            id_mipres: Vec::new(),
         }
     }
 
@@ -710,7 +728,14 @@ mod tests {
         l.mipres = "MIP-1".into();
         l.formula_number = " 20260901 ".into();
         l.diagnosis_code = "Z008".into();
-        let rips = built("01", vec![l.clone()]);
+        let inp = RipsInput {
+            invoice: "FVS1".into(),
+            lines: vec![l.clone()],
+            id_mipres: vec!["E-2026".into()],
+        };
+        let rips = build(&inp, &affiliate("01"), &opts())
+            .expect("build")
+            .expect("not skipped");
         let m = &rips.usuarios[0]
             .servicios
             .medicamentos
@@ -722,8 +747,12 @@ mod tests {
         assert_eq!((m.unidad_min_dispensa, m.cantidad_medicamento), (99, 150));
         assert_eq!(m.num_documento_identificacion, "123");
         assert_eq!(m.cod_diagnostico_relacionado, "Z000");
-        assert_eq!(m.id_mipres.as_deref(), Some("20260901"));
-        // "mipres" empty: null even with a formula number.
+        assert_eq!(
+            m.id_mipres.as_deref(),
+            Some("E-2026"),
+            "the stored delivery id, not the No. Formula"
+        );
+        // "mipres" empty: null and no stored id is consumed.
         l.mipres = String::new();
         let rips = built("01", vec![l]);
         let m = &rips.usuarios[0]
@@ -732,6 +761,61 @@ mod tests {
             .as_ref()
             .expect("meds")[0];
         assert_eq!(m.id_mipres, None);
+    }
+
+    #[test]
+    fn mipres_delivery_ids_follow_the_no_pbs_line_order() {
+        let mut med = med_line(2);
+        med.mipres = "MIP-1".into();
+        let mut os = os_line(3);
+        os.mipres = "MIP-2".into();
+        let inp = RipsInput {
+            invoice: "FVS1".into(),
+            lines: vec![med, os],
+            id_mipres: vec!["E-1".into(), "E-2".into()],
+        };
+        let rips = build(&inp, &affiliate("01"), &opts())
+            .expect("build")
+            .expect("not skipped");
+        let s = &rips.usuarios[0].servicios;
+        assert_eq!(
+            s.medicamentos.as_ref().expect("meds")[0]
+                .id_mipres
+                .as_deref(),
+            Some("E-1")
+        );
+        assert_eq!(
+            s.otros_servicios.as_ref().expect("oss")[0]
+                .id_mipres
+                .as_deref(),
+            Some("E-2")
+        );
+    }
+
+    #[test]
+    fn a_mipres_id_count_mismatch_is_a_data_error_not_a_guess() {
+        let mut med = med_line(2);
+        med.mipres = "MIP-1".into();
+        // One NO PBS line but two stored ids.
+        let inp = RipsInput {
+            invoice: "FVS1".into(),
+            lines: vec![med.clone()],
+            id_mipres: vec!["E-1".into(), "E-2".into()],
+        };
+        let error = build(&inp, &affiliate("01"), &opts()).expect_err("mismatch");
+        let message = format!("{error:#}");
+        assert!(message.contains("FVS1"), "{message}");
+        assert!(message.contains("2"), "{message}");
+        assert!(message.contains("1"), "{message}");
+        // Two NO PBS lines but one stored id.
+        let mut os = os_line(3);
+        os.mipres = "MIP-2".into();
+        let inp = RipsInput {
+            invoice: "FVS1".into(),
+            lines: vec![med, os],
+            id_mipres: vec!["E-1".into()],
+        };
+        assert!(build(&inp, &affiliate("01"), &opts()).is_err());
     }
 
     #[test]

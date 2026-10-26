@@ -84,9 +84,15 @@ pub fn select(dataset: Dataset, requested: Option<&[String]>) -> Selection {
 }
 
 fn rips_input(invoice: Invoice) -> RipsInput {
+    let id_mipres = if invoice.id_mipres.is_empty() {
+        Vec::new()
+    } else {
+        invoice.id_mipres.split(", ").map(str::to_owned).collect()
+    };
     RipsInput {
         invoice: invoice.invoice,
         lines: invoice.lines.into_iter().map(rips_line).collect(),
+        id_mipres,
     }
 }
 

@@ -612,13 +612,14 @@ struct FakeMipres {
 }
 
 impl FakeMipres {
-    fn with(mut self, prescription: &str, deliveries: &[(&str, i32)]) -> Self {
+    fn with(mut self, prescription: &str, deliveries: &[(&str, i32, &str)]) -> Self {
         self.deliveries.insert(
             prescription.into(),
             deliveries
                 .iter()
-                .map(|(id, state)| Delivery {
+                .map(|(id, state, delivery_id)| Delivery {
                     id: (*id).into(),
+                    delivery_id: (*delivery_id).into(),
                     state: *state,
                 })
                 .collect(),
@@ -668,42 +669,47 @@ fn manual_codes(result: &PrepareResult) -> HashMap<String, String> {
 
 #[test]
 fn a_delivered_invoice_is_prepared_with_the_matched_id() {
-    let fake = FakeMipres::default().with("P1", &[("999", 2), ("123", 2)]);
+    let fake = FakeMipres::default().with("P1", &[("999", 2, "E999"), ("123", 2, "E123")]);
     let result = Run::new("250000")
         .mipres(&fake)
         .ok(&[no_pbs("EVS-1", "P1", "123")]);
     assert_eq!(result.invoices.len(), 1);
-    assert_eq!(result.invoices[0].id_mipres, "123");
+    assert_eq!(result.invoices[0].id_mipres, "E123");
     assert!(result.excluded.is_empty() && result.manual_review.is_empty());
 }
 
 #[test]
 fn the_delivery_state_decides_the_outcome() {
-    type Case = (&'static str, Vec<(&'static str, i32)>, bool, &'static str);
+    type Case = (
+        &'static str,
+        Vec<(&'static str, i32, &'static str)>,
+        bool,
+        &'static str,
+    );
     let cases: Vec<Case> = vec![
-        ("delivered", vec![("7", 2)], true, ""),
-        ("annulled", vec![("7", 0)], false, "MIPRES ANULADO"),
+        ("delivered", vec![("7", 2, "D7")], true, ""),
+        ("annulled", vec![("7", 0, "A7")], false, "MIPRES ANULADO"),
         (
             "not delivered",
-            vec![("7", 1)],
+            vec![("7", 1, "N7")],
             false,
             "MIPRES NO ENTREGADO",
         ),
         (
             "delivered beats annulled",
-            vec![("7", 0), ("7", 1), ("7", 2)],
+            vec![("7", 0, "A7"), ("7", 1, "N7"), ("7", 2, "D7")],
             true,
             "",
         ),
         (
             "annulled beats not delivered",
-            vec![("7", 1), ("7", 0)],
+            vec![("7", 1, "N7"), ("7", 0, "A7")],
             false,
             "MIPRES ANULADO",
         ),
         (
             "other ids ignored",
-            vec![("8", 2), ("7", 1)],
+            vec![("8", 2, "E8"), ("7", 1, "N7")],
             false,
             "MIPRES NO ENTREGADO",
         ),
@@ -715,7 +721,7 @@ fn the_delivery_state_decides_the_outcome() {
             .ok(&[no_pbs("EVS-1", "P1", "7")]);
         if prepared {
             assert_eq!(result.invoices.len(), 1, "{name}");
-            assert_eq!(result.invoices[0].id_mipres, "7", "{name}");
+            assert_eq!(result.invoices[0].id_mipres, "D7", "{name}");
         } else {
             assert!(
                 result.invoices.is_empty() && result.manual_review.is_empty(),
@@ -729,17 +735,17 @@ fn the_delivery_state_decides_the_outcome() {
 #[test]
 fn delivery_ids_compare_numerically_when_both_are_numbers() {
     let fake = FakeMipres::default()
-        .with("P1", &[("007", 2)])
-        .with("P2", &[(" 12 ", 2)])
-        .with("P3", &[("A7", 2)]);
+        .with("P1", &[("007", 2, "700")])
+        .with("P2", &[(" 12 ", 2, " 812 ")])
+        .with("P3", &[("A7", 2, "D3")]);
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "7"),
         no_pbs("EVS-2", "P2", "12"),
         no_pbs("EVS-3", "P3", "a7"),
     ]);
     assert_eq!(result.invoices.len(), 2);
-    assert_eq!(result.invoices[0].id_mipres, "007");
-    assert_eq!(result.invoices[1].id_mipres, "12");
+    assert_eq!(result.invoices[0].id_mipres, "700");
+    assert_eq!(result.invoices[1].id_mipres, "812");
     assert!(result.manual_review.is_empty());
     assert_eq!(result.excluded.len(), 1);
     assert_eq!(result.excluded[0].invoice, "EVS3");
@@ -753,7 +759,7 @@ fn delivery_ids_compare_numerically_when_both_are_numbers() {
 #[test]
 fn no_matching_delivery_excludes_because_there_is_nothing_to_bill() {
     let fake = FakeMipres::default()
-        .with("P1", &[("8", 2)])
+        .with("P1", &[("8", 2, "D8")])
         .with("P2", &[]);
     let result = Run::new("250000")
         .mipres(&fake)
@@ -771,8 +777,8 @@ fn no_matching_delivery_excludes_because_there_is_nothing_to_bill() {
 fn a_failed_query_or_an_unknown_state_holds_the_invoice() {
     let fake = FakeMipres::default()
         .failing("P1", MipresError::Other("mipres: HTTP 500".into()))
-        .with("P2", &[("7", 5)])
-        .with("P3", &[("7", -1)]);
+        .with("P2", &[("7", 5, "D7")])
+        .with("P3", &[("7", -1, "D7")]);
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "7"),
         no_pbs("EVS-2", "P2", "7"),
@@ -797,9 +803,9 @@ fn a_failed_query_or_an_unknown_state_holds_the_invoice() {
 #[test]
 fn the_first_failing_line_decides() {
     let fake = FakeMipres::default()
-        .with("P1", &[("1", 2)])
-        .with("P2", &[("2", 1)])
-        .with("P3", &[("3", 0)]);
+        .with("P1", &[("1", 2, "D1")])
+        .with("P2", &[("2", 1, "D2")])
+        .with("P3", &[("3", 0, "D3")]);
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "1"),
         no_pbs("EVS-1", "P2", "2"),
@@ -812,25 +818,25 @@ fn the_first_failing_line_decides() {
 #[test]
 fn delivery_ids_are_distinct_and_in_line_order() {
     let fake = FakeMipres::default()
-        .with("P1", &[("20", 2)])
-        .with("P2", &[("10", 2), ("10", 2)]);
+        .with("P1", &[("20", 2, "D20")])
+        .with("P2", &[("10", 2, "D10"), ("10", 2, "D10")]);
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "20"),
         no_pbs("EVS-1", "P2", "10"),
         no_pbs("EVS-1", "P1", "20"),
     ]);
-    assert_eq!(result.invoices[0].id_mipres, "20, 10");
+    assert_eq!(result.invoices[0].id_mipres, "D20, D10");
 }
 
 #[test]
 fn lines_without_prescription_or_formula_are_not_checked() {
-    let fake = FakeMipres::default().with("P1", &[("1", 2)]);
+    let fake = FakeMipres::default().with("P1", &[("1", 2, "D1")]);
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "1"),
         no_pbs("EVS-1", "", "5"),
         no_pbs("EVS-1", "P9", ""),
     ]);
-    assert_eq!(result.invoices[0].id_mipres, "1");
+    assert_eq!(result.invoices[0].id_mipres, "D1");
     assert_eq!(fake.calls(), ["P1"]);
 
     let idle = FakeMipres::default();
@@ -844,7 +850,7 @@ fn lines_without_prescription_or_formula_are_not_checked() {
 
 #[test]
 fn only_no_pbs_invoices_that_passed_every_local_rule_are_checked() {
-    let fake = FakeMipres::default().with("P1", &[("1", 2)]);
+    let fake = FakeMipres::default().with("P1", &[("1", 2, "D1")]);
     let mut pos = line("EVS-1", "20010_01", "19950404-1", "1500", "1500");
     pos.mipres = "P1".into();
     pos.formula_number = "1".into();
@@ -862,14 +868,14 @@ fn only_no_pbs_invoices_that_passed_every_local_rule_are_checked() {
     );
     assert_eq!(result.invoices.len(), 2);
     assert_eq!(result.invoices[0].id_mipres, "");
-    assert_eq!(result.invoices[1].id_mipres, "1");
+    assert_eq!(result.invoices[1].id_mipres, "D1");
     assert!(reasons(&result)["EVS2"].starts_with("PRECIO_MAYOR_NOTA_TECNICA"));
 }
 
 #[test]
 fn answers_are_cached_per_prescription_failures_included() {
     let fake = FakeMipres::default()
-        .with("P1", &[("1", 2), ("2", 2)])
+        .with("P1", &[("1", 2, "D1"), ("2", 2, "D2")])
         .failing("P2", MipresError::Other("boom".into()));
     let result = Run::new("250000").mipres(&fake).ok(&[
         no_pbs("EVS-1", "P1", "1"),
@@ -885,9 +891,9 @@ fn answers_are_cached_per_prescription_failures_included() {
 #[test]
 fn rejected_invoices_do_not_count_in_stats_nor_consume_the_limit() {
     let fake = FakeMipres::default()
-        .with("P1", &[("1", 0)])
-        .with("P2", &[("2", 2)])
-        .with("P3", &[("3", 2)]);
+        .with("P1", &[("1", 0, "A1")])
+        .with("P2", &[("2", 2, "D2")])
+        .with("P3", &[("3", 2, "D3")]);
     let lines = vec![
         no_pbs("EVS-1", "P1", "1"),
         no_pbs("EVS-2", "P2", "2"),
@@ -897,9 +903,9 @@ fn rejected_invoices_do_not_count_in_stats_nor_consume_the_limit() {
     assert_eq!(result.stats.medicines, 2, "only prepared invoices count");
 
     let fake = FakeMipres::default()
-        .with("P1", &[("1", 0)])
-        .with("P2", &[("2", 2)])
-        .with("P3", &[("3", 2)]);
+        .with("P1", &[("1", 0, "A1")])
+        .with("P2", &[("2", 2, "D2")])
+        .with("P3", &[("3", 2, "D3")]);
     let result = Run::new("250000").limit(1).mipres(&fake).ok(&lines);
     assert_eq!(prepared_ids(&result), "EVS2");
     assert_eq!(reasons(&result)["EVS1"], "MIPRES ANULADO");
@@ -941,7 +947,7 @@ fn systemic_errors_abort_the_preparation() {
 #[test]
 fn ordinary_errors_stay_per_invoice_manual_review() {
     let fake = FakeMipres::default()
-        .with("P2", &[("2", 2)])
+        .with("P2", &[("2", 2, "D2")])
         .failing("P1", MipresError::Other("mipres: HTTP 404".into()));
     let result = Run::new("250000")
         .mipres(&fake)
@@ -966,7 +972,7 @@ fn without_a_checker_the_mipres_check_is_skipped() {
 fn an_outage_trips_the_breaker_and_holds_only_the_no_pbs_invoices() {
     let down = || MipresError::Unavailable("mipres: token request: i/o timeout".into());
     let fake = FakeMipres::default()
-        .with("P0", &[("7", 2)])
+        .with("P0", &[("7", 2, "D7")])
         .failing("P1", down())
         .failing("P2", down())
         .failing("P3", down());
@@ -1032,7 +1038,7 @@ fn needs_mipres_follows_the_selection_and_the_allowlist() {
 
 #[test]
 fn the_allowlist_composes_with_the_mipres_check() {
-    let delivered = || FakeMipres::default().with("P1", &[("123", 2)]);
+    let delivered = || FakeMipres::default().with("P1", &[("123", 2, "E123")]);
     let lines = [no_pbs("EVS-1", "P1", "123")];
 
     let fake = delivered();
@@ -1040,7 +1046,7 @@ fn the_allowlist_composes_with_the_mipres_check() {
         .automatic(&["EVENTO NO PBS"])
         .mipres(&fake)
         .ok(&lines);
-    assert_eq!(result.invoices[0].id_mipres, "123");
+    assert_eq!(result.invoices[0].id_mipres, "E123");
     assert_eq!(fake.calls(), ["P1"]);
 
     let fake = delivered();

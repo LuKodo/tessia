@@ -27,7 +27,7 @@ pub fn encode(rips: &Rips) -> anyhow::Result<String> {
 
 /// The map-building step of `ImprimirJSON`:
 ///
-/// * `idMIPRES` goes through `normalizarIdMIPRES` (null when blank, SSC or X);
+/// * `idMIPRES` is trimmed and becomes null when blank;
 /// * medicine diagnosis codes are upper-cased;
 /// * `(` and `)` are removed from `nomTecnologiaSalud`;
 /// * `unidadMinDispensa` above 99 is written as 99.
@@ -55,15 +55,10 @@ fn normalize_id_mipres_opt(value: Option<&str>) -> Option<String> {
     value.and_then(normalize_id_mipres)
 }
 
-/// `normalizarIdMIPRES`: the trimmed value, or `None` when it is blank or
-/// contains `SSC` or `X` (case-insensitive).
+/// `normalizarIdMIPRES`: the trimmed value, or `None` when it is blank.
 pub fn normalize_id_mipres(s: &str) -> Option<String> {
     let v = java_trim(s);
     if v.is_empty() {
-        return None;
-    }
-    let upper = go_upper(v);
-    if upper.contains("SSC") || upper.contains('X') {
         return None;
     }
     Some(v.to_owned())
@@ -74,13 +69,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn id_mipres_is_trimmed_and_dropped_for_ssc_or_x() {
+    fn id_mipres_is_trimmed_and_null_when_blank() {
         for (input, want) in [
             (" 12 ", Some("12")),
             ("", None),
             ("   ", None),
-            ("ssc1", None),
-            ("1x", None),
+            ("ssc1", Some("ssc1")),
+            ("1x", Some("1x")),
             ("20260901", Some("20260901")),
         ] {
             assert_eq!(normalize_id_mipres(input).as_deref(), want, "{input:?}");

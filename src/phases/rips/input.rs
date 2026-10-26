@@ -54,4 +54,9 @@ pub struct RipsInput {
     pub invoice: String,
     /// The invoice's lines in convenio order.
     pub lines: Vec<RipsLine>,
+    /// The MIPRES delivery ids (`Invoice.id_mipres`) in the order the NO PBS
+    /// lines (non-empty `mipres` column) were checked by `convenio preparar`.
+    /// The builder pairs them with those lines in order; a count that does not
+    /// match the number of NO PBS lines is a data error.
+    pub id_mipres: Vec<String>,
 }

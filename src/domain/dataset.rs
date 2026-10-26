@@ -210,7 +210,8 @@ pub struct Invoice {
     pub lines: Vec<Line>,
     /// Reconciliation evidence (set by `conciliar`).
     pub conciliacion: Option<InvoiceAudit>,
-    /// MIPRES delivery ids joined by `", "` (EVENTO NO PBS only).
+    /// MIPRES delivery ids (`IDEntrega`) joined by `", "` (EVENTO NO PBS only),
+    /// in the order the NO PBS lines were checked.
     pub id_mipres: String,
     /// Optimistic-locking version as read from the store (`0` when built in
     /// memory). `replace` ignores it; `update_invoices` takes it as the
