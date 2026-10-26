@@ -40,9 +40,10 @@ md-5 = "0.10"
 mime_guess = "2"
 percent-encoding = "2"
 # Statically builds libpq so the binary does not need a system libpq.
-# No OpenSSL: the app's Postgres is local/plain-TCP, so libpq is built
-# without TLS and the Windows build needs no OpenSSL installation.
-pq-sys = { version = "0.7", features = ["bundled_without_openssl"] }
+# OpenSSL is linked in so libpq can reach remote Postgres servers that only
+# accept TLS (hostssl in pg_hba.conf). On Windows, install it statically via
+# vcpkg (triplet x64-windows-static-md) and set VCPKGRS_TRIPLET.
+pq-sys = { version = "0.7", features = ["bundled"] }
 quick-xml = "0.38"
 r2d2 = "0.8"
 rand = "0.9"

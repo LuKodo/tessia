@@ -2587,6 +2587,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "openssl-sys"
+version = "0.9.117"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2777,6 +2789,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e70bbe4cdadd409f38beac5496e6b2d3f8a6a2881dc2705add79dfc9905b683c"
 dependencies = [
  "cc",
+ "openssl-sys",
 ]
 
 [[package]]
