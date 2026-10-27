@@ -13,7 +13,8 @@
 //! Module map: `csv` (reader), `amount` (number helpers), `catalog` +
 //! `nt_catalog` (NT lookup), `subplan`, `prepare` (rule engine, pure),
 //! `mipres` (check logic) + `mipres_client` (HTTP), `source` (CSV origin),
-//! `run` (orchestration), `summary` (console lines).
+//! `run` (orchestration), `summary` (console lines), `xlsx` (first sheet of an
+//! Excel workbook as CSV, for the manual upload).
 
 pub mod amount;
 pub mod catalog;
@@ -29,6 +30,7 @@ pub mod run;
 pub mod source;
 pub mod subplan;
 pub mod summary;
+pub mod xlsx;
 
 use anyhow::{Result, bail};
 

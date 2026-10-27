@@ -538,7 +538,7 @@ fn anything_but_one_csv_file_field_is_refused() {
         ("empty file name", multipart(&[("csv", Some(""), data)])),
         (
             "wrong extension",
-            multipart(&[("csv", Some("a.xlsx"), data)]),
+            multipart(&[("csv", Some("a.txt"), data)]),
         ),
         ("no extension", multipart(&[("csv", Some("csv"), data)])),
         (
@@ -555,7 +555,7 @@ fn anything_but_one_csv_file_field_is_refused() {
         assert_eq!(resp.status, 400, "{label}");
         assert_eq!(
             error_of(&resp),
-            "Selecciona un único archivo CSV.",
+            "Selecciona un único archivo CSV o Excel (.xlsx).",
             "{label}"
         );
     }
@@ -597,6 +597,107 @@ fn a_request_that_is_not_multipart_is_400() {
         assert_eq!(resp.status, 400);
         assert_eq!(error_of(&resp), "Solicitud multipart inválida.");
     }
+    assert_nothing_stored(&h);
+}
+
+/// A one-sheet workbook whose cells are all inline strings.
+fn xlsx_of(rows: &[Vec<String>]) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    use zip::write::SimpleFileOptions;
+    let escape = |t: &str| t.replace('&', "&amp;").replace('<', "&lt;");
+    let mut sheet = String::from("<worksheet><sheetData>");
+    for (r, row) in rows.iter().enumerate() {
+        sheet.push_str(&format!("<row r=\"{}\">", r + 1));
+        for (c, value) in row.iter().enumerate() {
+            let col = char::from(b'A' + u8::try_from(c).expect("column"));
+            sheet.push_str(&format!(
+                "<c r=\"{col}{}\" t=\"inlineStr\"><is><t>{}</t></is></c>",
+                r + 1,
+                escape(value)
+            ));
+        }
+        sheet.push_str("</row>");
+    }
+    sheet.push_str("</sheetData></worksheet>");
+    let entries = [
+        (
+            "xl/workbook.xml",
+            r#"<workbook xmlns:r="r"><sheets><sheet name="Hoja1" r:id="rId1"/></sheets></workbook>"#
+                .to_owned(),
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>"#
+                .to_owned(),
+        ),
+        ("xl/worksheets/sheet1.xml", sheet),
+    ];
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, body) in entries {
+        writer
+            .start_file(name, SimpleFileOptions::default())
+            .expect("start");
+        writer.write_all(body.as_bytes()).expect("write");
+    }
+    writer.finish().expect("finish").into_inner()
+}
+
+fn table(csv: &str) -> Vec<Vec<String>> {
+    csv.lines()
+        .map(|line| line.split('|').map(str::to_owned).collect())
+        .collect()
+}
+
+#[test]
+fn an_excel_workbook_becomes_a_manual_cargue_published_as_csv() {
+    let h = Harness::new();
+    let book = xlsx_of(&table(&valid_csv()));
+    let resp = upload_csv(&h, "devueltas.XLSX", &book);
+    assert_eq!(resp.status, 200, "{}", String::from_utf8_lossy(&resp.body));
+    let body = json(&resp);
+    let id = body["cargue"].as_str().expect("cargue").to_owned();
+    assert!(is_manual_id(&id), "{id}");
+    assert_eq!(body["file_name"], format!("{id}.csv"));
+
+    // The cargue keeps the CSV rendered from the sheet, not the workbook.
+    let published = h
+        .state
+        .ctx
+        .artifacts()
+        .fetch_bytes(&id, &format!("{id}.csv"))
+        .expect("fetch");
+    let expected = valid_csv().replace('|', ";");
+    assert_eq!(String::from_utf8(published).expect("utf8"), expected);
+    assert_eq!(h.objects.keys(), vec![format!("{id}__{id}.csv")]);
+}
+
+#[test]
+fn an_unreadable_or_empty_excel_workbook_is_refused() {
+    let h = Harness::new();
+    let not_a_zip = b"esto no es un libro de Excel".to_vec();
+    let empty_sheet = xlsx_of(&[]);
+    for (label, book) in [("not a zip", not_a_zip), ("empty sheet", empty_sheet)] {
+        let resp = upload_csv(&h, "a.xlsx", &book);
+        assert_eq!(resp.status, 400, "{label}");
+        assert_eq!(
+            error_of(&resp),
+            "No se pudo leer el archivo Excel o su primera hoja está vacía.",
+            "{label}"
+        );
+    }
+    assert_nothing_stored(&h);
+}
+
+#[test]
+fn an_excel_workbook_without_the_required_columns_is_an_invalid_csv() {
+    let h = Harness::new();
+    let book = xlsx_of(&table("nit|factura\n1|A\n"));
+    let resp = upload_csv(&h, "a.xlsx", &book);
+    assert_eq!(resp.status, 400);
+    assert_eq!(
+        error_of(&resp),
+        "El CSV de convenio es inválido o no contiene registros válidos."
+    );
     assert_nothing_stored(&h);
 }
 
