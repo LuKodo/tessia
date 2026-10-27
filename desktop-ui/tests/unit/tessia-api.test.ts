@@ -122,10 +122,10 @@ describe("tessia api endpoints", () => {
   it("uploads the convenio CSV as multipart without date fields", async () => {
     const { api, last } = setup();
     await api.uploadConvenio({ csv: new Blob(["a"]) });
-    const form = last().init.body as FormData;
-    expect(form.get("desde")).toBeNull();
-    expect(form.get("hasta")).toBeNull();
-    expect(form.get("csv")).toBeInstanceOf(Blob);
+    const form = new TextDecoder().decode(last().init.body as Uint8Array);
+    expect(form).not.toContain('name="desde"');
+    expect(form).not.toContain('name="hasta"');
+    expect(form).toContain('name="csv"; filename="blob"');
   });
 
   it("reads the nota técnica with a plain GET and exposes no upload for it (read-only from Redis)", async () => {

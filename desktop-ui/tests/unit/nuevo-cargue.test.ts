@@ -110,8 +110,8 @@ describe("<tx-nuevo-cargue>", () => {
     click(q(el, "[data-testid=subir-csv]"));
     await flush(el);
 
-    const form = callsTo("POST", "/api/convenio/upload")[0]?.body as FormData;
-    expect((form.get("csv") as File).name).toBe("devueltas.xlsx");
+    const form = new TextDecoder().decode(callsTo("POST", "/api/convenio/upload")[0]?.body as Uint8Array);
+    expect(form).toContain('name="csv"; filename="devueltas.xlsx"');
     expect(q(el, "[data-testid=upload-msg]").classList.contains("text-success")).toBe(true);
   });
 
@@ -125,10 +125,11 @@ describe("<tx-nuevo-cargue>", () => {
 
     const sent = callsTo("POST", "/api/convenio/upload");
     expect(sent).toHaveLength(1);
-    const form = sent[0]?.body as FormData;
-    expect(form.get("desde")).toBeNull();
-    expect(form.get("hasta")).toBeNull();
-    expect((form.get("csv") as File).name).toBe("convenio.csv");
+    const form = new TextDecoder().decode(sent[0]?.body as Uint8Array);
+    expect(form).not.toContain('name="desde"');
+    expect(form).not.toContain('name="hasta"');
+    expect(form).toContain('name="csv"; filename="convenio.csv"');
+    expect(form).toContain("factura;valor\nEVS1;10");
     expect(q(el, "[data-testid=upload-msg]").textContent).toBe('Cargue "Manual_20261016T120000Z_abcd1234" creado (Manual_20261016T120000Z_abcd1234.csv). Aparecerá como SIN_PREPARAR.');
     expect(q(el, "[data-testid=upload-msg]").classList.contains("text-success")).toBe(true);
     await upload.updateComplete;

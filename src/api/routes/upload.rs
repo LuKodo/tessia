@@ -47,6 +47,13 @@ pub fn post(state: &ApiState, req: &Request) -> ApiResult {
         return Err(ApiError::new(413, TOO_LARGE));
     }
     let (upload, kind) = single_file(req)?;
+    if upload.is_empty() {
+        tracing::warn!(
+            body_bytes = req.body.len(),
+            content_length = req.header("content-length").unwrap_or("-"),
+            "upload: the file part is empty (the request body reached the API without its file)"
+        );
+    }
     if upload.len() > MAX_UPLOAD_FILE {
         return Err(ApiError::new(413, TOO_LARGE));
     }
