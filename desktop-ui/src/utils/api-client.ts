@@ -54,6 +54,38 @@ function errorMessageOf(body: unknown): string {
   return "";
 }
 
+const quoteHeaderValue = (value: string) => value.replace(/[\r\n"]/g, (c) => (c === '"' ? "%22" : c === "\r" ? "%0D" : "%0A"));
+
+/**
+ * Serializes a form into one in-memory multipart body. The desktop webview hands requests to the app through a
+ * custom protocol and does not carry file-backed bodies (a `File` inside `FormData`) across it: the server
+ * received an empty file. Bytes held in memory travel as-is.
+ */
+export async function encodeMultipart(form: FormData): Promise<{ body: Uint8Array<ArrayBuffer>; contentType: string }> {
+  const boundary = `----tessia${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  const text = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  for (const [name, value] of form.entries()) {
+    const disposition = `Content-Disposition: form-data; name="${quoteHeaderValue(name)}"`;
+    if (typeof value === "string") {
+      chunks.push(text.encode(`--${boundary}\r\n${disposition}\r\n\r\n${value}\r\n`));
+      continue;
+    }
+    const type = value.type || "application/octet-stream";
+    chunks.push(text.encode(`--${boundary}\r\n${disposition}; filename="${quoteHeaderValue(value.name)}"\r\nContent-Type: ${type}\r\n\r\n`));
+    chunks.push(new Uint8Array(await value.arrayBuffer()));
+    chunks.push(text.encode("\r\n"));
+  }
+  chunks.push(text.encode(`--${boundary}--\r\n`));
+  const body = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const doFetch = (url: string, init?: RequestInit) => (options.fetch ?? globalThis.fetch)(url, init);
 
@@ -98,7 +130,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         undefined,
         !opts?.lenient,
       ) as Promise<T>,
-    // No Content-Type: the browser sets the multipart boundary itself.
-    upload: <T>(path: string, form: FormData) => call(path, { method: "POST", body: form }, undefined, true) as Promise<T>,
+    upload: async <T>(path: string, form: FormData) => {
+      const { body, contentType } = await encodeMultipart(form);
+      return (await call(path, { method: "POST", headers: { "Content-Type": contentType }, body }, undefined, true)) as T;
+    },
   };
 }

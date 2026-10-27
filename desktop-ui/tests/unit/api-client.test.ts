@@ -156,14 +156,22 @@ describe("requests", () => {
     expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
   });
 
-  it("upload posts FormData without forcing a content type", async () => {
+  it("upload posts one in-memory multipart body with its own boundary", async () => {
     const { client, fetchMock } = clientWith(jsonResponse({ ok: true }));
     const form = new FormData();
     form.append("desde", "2026-09-01");
+    form.append("csv", new File(["a;b\n1;ñ"], 'con "comillas".csv', { type: "text/csv" }));
     await client.upload("/api/convenio/upload", form);
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.method).toBe("POST");
-    expect(init.body).toBe(form);
-    expect(new Headers(init.headers).get("Content-Type")).toBeNull();
+    const contentType = new Headers(init.headers).get("Content-Type") ?? "";
+    const boundary = /^multipart\/form-data; boundary=(.+)$/.exec(contentType)?.[1];
+    expect(boundary).toBeTruthy();
+    expect(init.body).toBeInstanceOf(Uint8Array);
+    expect(new TextDecoder().decode(init.body as Uint8Array)).toBe(
+      `--${boundary}\r\nContent-Disposition: form-data; name="desde"\r\n\r\n2026-09-01\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name="csv"; filename="con %22comillas%22.csv"\r\nContent-Type: text/csv\r\n\r\na;b\n1;ñ\r\n` +
+        `--${boundary}--\r\n`,
+    );
   });
 });
