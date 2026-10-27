@@ -2,8 +2,10 @@
 //! `cmd_serve_convenio_upload.go`, spec gap 6).
 //!
 //! The request is `multipart/form-data` with exactly one file field `csv`
-//! whose name ends in `.csv`. The CSV is read with the same reader `convenio
-//! preparar` uses and refused when it has no valid rows or any malformed one.
+//! whose name ends in `.csv` or `.xlsx`. An Excel workbook is turned into CSV
+//! first (its first sheet, see `convenio_preparar::xlsx`). The CSV is read
+//! with the same reader `convenio preparar` uses and refused when it has no
+//! valid rows or any malformed one; the cause of each refusal is logged.
 //! A valid CSV becomes the cargue `Manual_<ts>_<hash12>` (S8): its bytes are
 //! published to the bucket as `<id>.csv` and the cargue is registered with
 //! origin `manual`, so `proceso run` picks it up like a downloaded one.
@@ -25,13 +27,15 @@ use crate::api::{
 };
 use crate::domain::cargue::{LoadOrigin, load_context};
 use crate::phases::convenio_preparar::csv::read_csv;
+use crate::phases::convenio_preparar::xlsx::first_sheet_to_csv;
 use crate::storage::Artifacts;
 use crate::stores::artefactos::ArtefactosStore;
 use crate::stores::cargues::{CarguesStore, IngestError, NewCargue};
 
 pub const TOO_LARGE: &str = "El CSV supera el límite de 32 MiB.";
 pub const BAD_MULTIPART: &str = "Solicitud multipart inválida.";
-pub const ONE_CSV_ONLY: &str = "Selecciona un único archivo CSV.";
+pub const ONE_FILE_ONLY: &str = "Selecciona un único archivo CSV o Excel (.xlsx).";
+pub const INVALID_XLSX: &str = "No se pudo leer el archivo Excel o su primera hoja está vacía.";
 pub const INVALID_CSV: &str = "El CSV de convenio es inválido o no contiene registros válidos.";
 pub const MALFORMED_ROWS: &str = "El CSV contiene filas con columnas incompletas o mal formadas.";
 pub const STORE_CSV_FAILED: &str = "No se pudo guardar el CSV.";
@@ -42,15 +46,41 @@ pub fn post(state: &ApiState, req: &Request) -> ApiResult {
     if req.body.len() > MAX_UPLOAD_BODY {
         return Err(ApiError::new(413, TOO_LARGE));
     }
-    let file = single_csv(req)?;
-    if file.len() > MAX_UPLOAD_FILE {
+    let (upload, kind) = single_file(req)?;
+    if upload.len() > MAX_UPLOAD_FILE {
         return Err(ApiError::new(413, TOO_LARGE));
     }
-    let read = read_csv(Cursor::new(file)).map_err(|_| ApiError::bad_request(INVALID_CSV))?;
+    let converted;
+    let file: &[u8] = match kind {
+        FileKind::Csv => upload,
+        FileKind::Xlsx => {
+            converted = first_sheet_to_csv(upload).map_err(|err| {
+                tracing::warn!(
+                    error = format!("{err:#}"),
+                    "upload: unreadable Excel workbook"
+                );
+                ApiError::bad_request(INVALID_XLSX)
+            })?;
+            &converted
+        }
+    };
+    let read = read_csv(Cursor::new(file)).map_err(|err| {
+        tracing::warn!(
+            error = format!("{err:#}"),
+            "upload: unreadable convenio CSV"
+        );
+        ApiError::bad_request(INVALID_CSV)
+    })?;
     if read.lines.is_empty() {
+        tracing::warn!("upload: the convenio CSV has no valid rows");
         return Err(ApiError::bad_request(INVALID_CSV));
     }
     if read.skipped > 0 {
+        tracing::warn!(
+            skipped = read.skipped,
+            first_lines = ?read.skipped_lines.iter().take(10).collect::<Vec<_>>(),
+            "upload: the convenio CSV has rows with a wrong column count"
+        );
         return Err(ApiError::bad_request(MALFORMED_ROWS));
     }
 
@@ -97,9 +127,17 @@ pub fn post(state: &ApiState, req: &Request) -> ApiResult {
     ))
 }
 
-/// The bytes of the one `csv` file field, after Go's checks: exactly one file
-/// part, named `csv`, whose file name ends in `.csv` (any case).
-fn single_csv(req: &Request) -> Result<&[u8], ApiError> {
+/// What the uploaded file is, from its extension.
+#[derive(Clone, Copy)]
+enum FileKind {
+    Csv,
+    Xlsx,
+}
+
+/// The bytes of the one `csv` file field and its kind, after Go's checks:
+/// exactly one file part, named `csv`, whose file name ends in `.csv` or
+/// `.xlsx` (any case).
+fn single_file(req: &Request) -> Result<(&[u8], FileKind), ApiError> {
     let boundary = req
         .header("content-type")
         .and_then(boundary_of)
@@ -108,19 +146,26 @@ fn single_csv(req: &Request) -> Result<&[u8], ApiError> {
         parse_parts(&req.body, &boundary).ok_or_else(|| ApiError::bad_request(BAD_MULTIPART))?;
     let mut files = parts.iter().filter(|p| p.filename.is_some());
     match (files.next(), files.next()) {
-        (Some(part), None)
-            if part.name == "csv" && part.filename.as_deref().is_some_and(has_csv_extension) =>
-        {
-            Ok(part.data)
+        (Some(part), None) if part.name == "csv" => {
+            match part.filename.as_deref().and_then(file_kind) {
+                Some(kind) => Ok((part.data, kind)),
+                None => Err(ApiError::bad_request(ONE_FILE_ONLY)),
+            }
         }
-        _ => Err(ApiError::bad_request(ONE_CSV_ONLY)),
+        _ => Err(ApiError::bad_request(ONE_FILE_ONLY)),
     }
 }
 
-/// Go `strings.EqualFold(filepath.Ext(name), ".csv")`.
-fn has_csv_extension(name: &str) -> bool {
-    name.rsplit_once('.')
-        .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("csv"))
+/// Go `strings.EqualFold(filepath.Ext(name), ".csv")`, plus `.xlsx`.
+fn file_kind(name: &str) -> Option<FileKind> {
+    let (_, ext) = name.rsplit_once('.')?;
+    if ext.eq_ignore_ascii_case("csv") {
+        Some(FileKind::Csv)
+    } else if ext.eq_ignore_ascii_case("xlsx") {
+        Some(FileKind::Xlsx)
+    } else {
+        None
+    }
 }
 
 struct Part<'a> {
@@ -395,12 +440,20 @@ mod tests {
 
     #[test]
     fn extensions_follow_go_ext() {
-        assert!(has_csv_extension("a.csv"));
-        assert!(has_csv_extension("a.CsV"));
-        assert!(has_csv_extension(".csv"));
-        assert!(!has_csv_extension("csv"));
-        assert!(!has_csv_extension("a.csv.txt"));
-        assert!(!has_csv_extension("a.xlsx"));
+        let kind = |name| match file_kind(name) {
+            Some(FileKind::Csv) => "csv",
+            Some(FileKind::Xlsx) => "xlsx",
+            None => "none",
+        };
+        assert_eq!(kind("a.csv"), "csv");
+        assert_eq!(kind("a.CsV"), "csv");
+        assert_eq!(kind(".csv"), "csv");
+        assert_eq!(kind("a.xlsx"), "xlsx");
+        assert_eq!(kind("A.XLSX"), "xlsx");
+        assert_eq!(kind("csv"), "none");
+        assert_eq!(kind("a.csv.txt"), "none");
+        assert_eq!(kind("a.xls"), "none");
+        assert_eq!(kind("a.xlsx.csv"), "csv");
     }
 
     #[test]

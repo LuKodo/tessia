@@ -98,8 +98,21 @@ describe("<tx-nuevo-cargue>", () => {
     const { el, calls } = await mountCard();
     click(q(el, "[data-testid=subir-csv]"));
     await el.updateComplete;
-    expect(q(el, "[data-testid=upload-msg]").textContent).toBe("elige un archivo CSV");
+    expect(q(el, "[data-testid=upload-msg]").textContent).toBe("elige un archivo CSV o Excel");
     expect(calls).toHaveLength(0);
+  });
+
+  it("also uploads an Excel workbook, under the same csv field", async () => {
+    const { el, callsTo } = await mountCard({ "POST /api/convenio/upload": { ok: true, cargue: "Manual_20261016T120000Z_abcd1234", file_name: "Manual_20261016T120000Z_abcd1234.csv" } });
+    const upload = pickFile(el, new File(["PK"], "devueltas.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    await el.updateComplete;
+    expect(upload.getAttribute("accept")).toBe(".csv,.xlsx");
+    click(q(el, "[data-testid=subir-csv]"));
+    await flush(el);
+
+    const form = callsTo("POST", "/api/convenio/upload")[0]?.body as FormData;
+    expect((form.get("csv") as File).name).toBe("devueltas.xlsx");
+    expect(q(el, "[data-testid=upload-msg]").classList.contains("text-success")).toBe(true);
   });
 
   it("uploads only the CSV and reports the generated cargue", async () => {
@@ -125,7 +138,7 @@ describe("<tx-nuevo-cargue>", () => {
   it("only accepts .csv files in the picker", async () => {
     const { el } = await mountCard();
     const upload = q<TxFileUpload>(el, "[data-testid=csv-file]");
-    expect(upload.accept).toBe(".csv");
+    expect(upload.accept).toBe(".csv,.xlsx");
     expect(upload.variant).toBe("button");
   });
 

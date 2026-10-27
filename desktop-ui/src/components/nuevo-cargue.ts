@@ -12,7 +12,7 @@ import "./tx-separator";
 
 /**
  * "Nuevo cargue (convenio descargar)" card: download a Medicar date range after the operator confirms,
- * or upload a manual CSV (POST /api/convenio/upload), which never contacts Medicar and gets its own name.
+ * or upload a manual CSV/Excel file (POST /api/convenio/upload), which never contacts Medicar and gets its own name.
  */
 export class TxNuevoCargue extends LitElement {
   static properties = {
@@ -90,10 +90,10 @@ export class TxNuevoCargue extends LitElement {
 
   private async subirCSV(): Promise<void> {
     if (!this.csv) {
-      this.uploadMsg = { text: "elige un archivo CSV", kind: "error" };
+      this.uploadMsg = { text: "elige un archivo CSV o Excel", kind: "error" };
       return;
     }
-    this.uploadMsg = { text: "subiendo CSV…", kind: "" };
+    this.uploadMsg = { text: "subiendo archivo…", kind: "" };
     try {
       const res = await api.uploadConvenio({ csv: this.csv });
       this.csv = null;
@@ -122,18 +122,18 @@ export class TxNuevoCargue extends LitElement {
         </div>
         ${this.message(this.msg, "download-msg")}
 
-        <tx-separator label="o subir un CSV manual (sin fechas, no consulta Medicar)"></tx-separator>
+        <tx-separator label="o subir un CSV o Excel manual (sin fechas, no consulta Medicar)"></tx-separator>
         <div class="row">
           <tx-file-upload
             data-testid="csv-file"
             variant="button"
-            label="CSV de convenio"
-            description="Elegir archivo (.csv)"
-            accept=".csv"
+            label="Archivo de convenio"
+            description="Elegir archivo (.csv o .xlsx)"
+            accept=".csv,.xlsx"
             .files=${this.csv ? [this.csv] : []}
             @tx-change=${(e: CustomEvent<{ files: File[] }>) => (this.csv = e.detail.files[0] ?? null)}
           ></tx-file-upload>
-          <tx-button variant="outline" data-testid="subir-csv" @click=${() => void this.subirCSV()}>Subir CSV</tx-button>
+          <tx-button variant="outline" data-testid="subir-csv" @click=${() => void this.subirCSV()}>Subir archivo</tx-button>
         </div>
         ${this.message(this.uploadMsg, "upload-msg")}
       </tx-card>
