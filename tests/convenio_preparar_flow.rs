@@ -309,7 +309,7 @@ fn the_cap_comes_from_the_flag_then_the_stored_parameters_then_the_settings() {
     let (_db, ctx, dir) = setup();
     let path = write_csv(
         dir.path(),
-        "Manual_c.csv",
+        "Convenio_21102026_21102026.csv",
         &csv(&[pos("EVS-5", "1", "1500", "300000")]),
     );
     let mut req = request(&path);
@@ -320,7 +320,10 @@ fn the_cap_comes_from_the_flag_then_the_stored_parameters_then_the_settings() {
         "the maximum amount is required: --monto-maximo 100000 or TESSIA_CONVENIO_MAX_INVOICE_AMOUNT"
     );
     assert!(
-        ctx.cargues().newest("Manual_c").expect("n").is_none(),
+        ctx.cargues()
+            .newest("Convenio_21102026_21102026")
+            .expect("n")
+            .is_none(),
         "nothing registered"
     );
 
@@ -360,6 +363,31 @@ fn the_cap_comes_from_the_flag_then_the_stored_parameters_then_the_settings() {
         plan.result.excluded[0]
             .reason
             .starts_with("MONTO_MAXIMO_SUPERADO")
+    );
+}
+
+#[test]
+fn a_manual_cargue_ignores_the_subplan_allowlist_and_a_medicar_one_applies_it() {
+    let (_db, ctx, dir) = setup();
+    let mut stored = Parametros::defaults("400000".parse().expect("amount"));
+    stored.automatic_subplans = vec!["EVENTO NO PBS".into()];
+    ctx.parametros().set(&stored).expect("params");
+    let rows = csv(&[pos("EVS-1", "1", "1500", "1500")]);
+
+    let manual = write_csv(dir.path(), "Manual_s.csv", &rows);
+    let plan = plan_preparation(&ctx, &request(&manual), None).expect("manual");
+    assert_eq!(plan.load.origin, LoadOrigin::Manual);
+    assert_eq!(
+        (plan.result.invoices.len(), plan.result.excluded.len()),
+        (1, 0)
+    );
+
+    let medicar = write_csv(dir.path(), "Convenio_21102026_21102026.csv", &rows);
+    let plan = plan_preparation(&ctx, &request(&medicar), None).expect("medicar");
+    assert_eq!(plan.load.origin, LoadOrigin::Medicar);
+    assert_eq!(
+        (plan.result.invoices.len(), plan.result.excluded.len()),
+        (0, 1)
     );
 }
 

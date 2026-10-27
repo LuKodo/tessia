@@ -5,6 +5,7 @@ export const DEFAULT_AUTOMATIC_SUBPLANS: readonly string[] = [
   "EVENTO POS",
   "EVENTO NO PBS",
   "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION",
+  "EVENTO SAS SIN AUTORIZACION",
 ];
 
 // Must stay equal to convenio.DefaultWaveSize / convenio.MaxWaveSize.

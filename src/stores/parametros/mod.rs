@@ -29,6 +29,7 @@ pub fn default_automatic_subplans() -> Vec<String> {
         "EVENTO POS",
         "EVENTO NO PBS",
         "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION",
+        "EVENTO SAS SIN AUTORIZACION",
     ]
     .map(String::from)
     .to_vec()
@@ -247,7 +248,7 @@ mod tests {
             ),
             (20, 4, 50)
         );
-        assert_eq!(params.automatic_subplans.len(), 3);
+        assert_eq!(params.automatic_subplans.len(), 4);
     }
 
     #[test]

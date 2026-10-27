@@ -228,7 +228,7 @@ fn parameters_default_to_configured_false_with_the_configured_cap() {
         json!({
             "configured": false,
             "max_invoice_amount": "1500000",
-            "automatic_subplans": ["EVENTO POS", "EVENTO NO PBS", "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION"],
+            "automatic_subplans": ["EVENTO POS", "EVENTO NO PBS", "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION", "EVENTO SAS SIN AUTORIZACION"],
             "wave_size": 20,
             "derechos_unavailable_percent": 50,
             "derechos_min_sample": 4,

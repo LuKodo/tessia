@@ -48,6 +48,7 @@ describe("ParametersFormController", () => {
       "EVENTO POS",
       "EVENTO NO PBS",
       "TRANSFERENCIA DE PENDIENTES CON AUTORIZACION",
+      "EVENTO SAS SIN AUTORIZACION",
       "Plan Especial",
     ]);
     expect(form.selected).toEqual(["EVENTO POS", "Plan Especial"]);

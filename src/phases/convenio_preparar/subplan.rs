@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use crate::domain::cargue::LoadOrigin;
 use crate::domain::dataset::Line;
 use crate::domain::normalize_invoice;
 use crate::stores::parametros::default_automatic_subplans;
@@ -10,15 +11,17 @@ use crate::util::text::normalize_key;
 
 /// The subplans filed automatically. Any other subplan is prepared only when
 /// its invoice is named with `--invoices`. Matching is case, accent and
-/// spacing insensitive.
+/// spacing insensitive. A manual cargue is not filtered by subplan.
 #[derive(Debug, Clone)]
 pub struct AutomaticSubplans {
     keys: HashSet<String>,
+    every: bool,
 }
 
 impl AutomaticSubplans {
     /// The hard-coded defaults (`EVENTO POS`, `EVENTO NO PBS`,
-    /// `TRANSFERENCIA DE PENDIENTES CON AUTORIZACION`).
+    /// `TRANSFERENCIA DE PENDIENTES CON AUTORIZACION`,
+    /// `EVENTO SAS SIN AUTORIZACION`).
     pub fn defaults() -> Self {
         Self::from_list(&default_automatic_subplans())
     }
@@ -27,12 +30,25 @@ impl AutomaticSubplans {
     pub fn from_list(list: &[String]) -> Self {
         Self {
             keys: list.iter().map(|s| normalize_key(s)).collect(),
+            every: false,
+        }
+    }
+
+    /// The allowlist that applies to a cargue of `origin`: a manual cargue
+    /// passes every subplan, any other origin uses `list`.
+    pub fn for_origin(origin: LoadOrigin, list: &[String]) -> Self {
+        match origin {
+            LoadOrigin::Manual => Self {
+                keys: HashSet::new(),
+                every: true,
+            },
+            _ => Self::from_list(list),
         }
     }
 
     /// True when invoices of `subplan` are prepared automatically.
     pub fn allows(&self, subplan: &str) -> bool {
-        self.keys.contains(&normalize_key(subplan))
+        self.every || self.keys.contains(&normalize_key(subplan))
     }
 }
 
@@ -80,8 +96,22 @@ mod tests {
         assert!(auto.allows("EVENTO POS"));
         assert!(auto.allows("  evento  no pbs "));
         assert!(auto.allows("Transferencia de Pendientes con Autorización"));
-        assert!(!auto.allows("EVENTO SAS SIN AUTORIZACION"));
+        assert!(auto.allows("EVENTO SAS SIN AUTORIZACION"));
+        assert!(!auto.allows("EVENTO SAS"));
         assert!(!auto.allows(""));
+    }
+
+    #[test]
+    fn a_manual_cargue_allows_every_subplan_and_the_others_use_the_list() {
+        let list = ["EVENTO POS".to_owned()];
+        let manual = AutomaticSubplans::for_origin(LoadOrigin::Manual, &list);
+        assert!(manual.allows("CUALQUIER PLAN"));
+        assert!(manual.allows(""));
+        for origin in [LoadOrigin::Medicar, LoadOrigin::Unknown] {
+            let listed = AutomaticSubplans::for_origin(origin, &list);
+            assert!(listed.allows("evento pos"));
+            assert!(!listed.allows("CUALQUIER PLAN"));
+        }
     }
 
     #[test]

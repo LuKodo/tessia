@@ -509,13 +509,14 @@ fn the_subplan_allowlist_is_tolerant_and_empty_is_not_automatic() {
         line_sub("EVS-3", "Transferencia de Pendientes con Autorizacion"),
         line_sub("EVS-4", "EVENTO SAS SIN AUTORIZACION"),
         line_sub("EVS-5", ""),
+        line_sub("EVS-6", "PLAN NO LISTADO"),
     ];
     let result = Run::new("250000").ok(&lines);
-    assert_eq!(prepared_ids(&result), "EVS1,EVS2,EVS3");
+    assert_eq!(prepared_ids(&result), "EVS1,EVS2,EVS3,EVS4");
     let excluded = reasons(&result);
     assert_eq!(
-        excluded["EVS4"],
-        "Subplan 'EVENTO SAS SIN AUTORIZACION' no se radica automaticamente; use --invoices para forzarlo."
+        excluded["EVS6"],
+        "Subplan 'PLAN NO LISTADO' no se radica automaticamente; use --invoices para forzarlo."
     );
     assert_eq!(
         excluded["EVS5"],

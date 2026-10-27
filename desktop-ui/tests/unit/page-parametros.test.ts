@@ -78,7 +78,7 @@ describe("<tx-page-parametros>", () => {
     expect(text).toContain(WAVE_SIZE_HINT);
     expect(text).toContain("Invoices above this amount will not be prepared automatically.");
     const checked = checkboxes(el).map((c) => c.checked);
-    expect(checked).toEqual([true, false, false, true]);
+    expect(checked).toEqual([true, false, false, false, true]);
     expect(q(el, "[data-testid=not-configured]")).toBeNull();
     expect(q(el, "[data-testid=form-error]")).toBeNull();
   });
@@ -117,8 +117,8 @@ describe("<tx-page-parametros>", () => {
     await type(el, "cuv-min-sample", "9");
     // Untick "Plan Especial" (the last option) and tick the second default.
     const boxes = checkboxes(el);
-    expect(boxes).toHaveLength(4);
-    await toggle(el, 3);
+    expect(boxes).toHaveLength(5);
+    await toggle(el, 4);
     await toggle(el, 1);
     await submit(el);
 

@@ -67,7 +67,7 @@ impl Supplier {
         .context("replacement: nota técnica")?;
         Ok(Some(Self {
             catalog,
-            automatic: AutomaticSubplans::from_list(&plan.automatic_subplans),
+            automatic: AutomaticSubplans::for_origin(plan.load.origin, &plan.automatic_subplans),
             by_invoice,
             min_chunk: min_chunk.max(1),
             pool: Mutex::new(Pool {

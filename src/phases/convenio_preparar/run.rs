@@ -124,8 +124,8 @@ pub fn plan_preparation(
     checker: Option<&dyn MipresChecker>,
 ) -> Result<Plan> {
     let (max, subplans) = resolve_options(ctx, request.max_amount.as_deref())?;
-    let automatic = AutomaticSubplans::from_list(&subplans);
     let resolved = resolve_source(ctx, &request.source)?;
+    let automatic = AutomaticSubplans::for_origin(resolved.info.origin, &subplans);
     let csv = read_csv(BufReader::new(resolved.bytes.as_slice()))?;
     let only = crate::domain::invoice::normalize_all(&request.only);
 
